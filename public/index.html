@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Collage Studio</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css" />
+  <link rel="stylesheet" href="styles.css" />
+  <script>try { var t = localStorage.getItem('collage.theme'); if (t && t !== 'auto') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="row gap">
+      <div class="brand">Collage Studio</div>
+      <input id="projectName" class="project-name" type="text" maxlength="80" value="Untitled collage" aria-label="Project name" spellcheck="false" />
+      <div class="row gap-sm project-actions">
+        <button id="btnNewProject" class="ghost" title="Start an empty collage">New</button>
+        <button id="btnOpenProject" class="ghost" title="Open a .collage project file">Open…</button>
+        <button id="btnSaveProject" class="ghost" title="Download the whole project (images, layout, settings) as a .collage file">Save project</button>
+        <input id="projectInput" type="file" accept=".collage" hidden />
+      </div>
+      <span id="saveState" class="save-state"></span>
+    </div>
+    <div class="topbar-actions">
+      <button id="btnTheme" class="ghost" title="Theme">◐ Auto</button>
+      <button id="btnUndo" class="ghost" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
+      <button id="btnRedo" class="ghost" title="Redo (Ctrl+Y / Ctrl+Shift+Z)" disabled>↷ Redo</button>
+      <button id="btnExport" class="primary">Export print…</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- LEFT: sticker library -->
+    <aside class="panel left sheet" data-sheet-panel="stickers">
+      <section>
+        <h2>Stickers</h2>
+        <div class="row gap">
+          <label class="button primary file-btn">
+            Upload images
+            <input id="fileInput" type="file" accept="image/*" multiple hidden />
+          </label>
+          <button id="btnOpenSearch">Search online</button>
+          <button id="btnPaste" title="Add an image (or image link) from the clipboard — or just press Ctrl+V / ⌘V">Paste</button>
+        </div>
+        <p class="hint">Drop image files anywhere on the page, or paste with Ctrl+V. Tick a sticker to use it, set how many copies the random layout should place.</p>
+      </section>
+      <section class="library-wrap">
+        <div class="library-head">
+          <span id="libCount">0 stickers</span>
+          <span class="row gap-sm">
+            <button class="link" id="btnSelectAll">All</button>
+            <button class="link" id="btnSelectNone">None</button>
+          </span>
+        </div>
+        <div id="libTools" class="lib-tools hidden">
+          <input id="libSearch" type="search" placeholder="Search name or #tag" aria-label="Search stickers" />
+          <select id="libSort" aria-label="Sort stickers" title="Sort (only changes how the list is shown)">
+            <option value="added">Order added</option>
+            <option value="name">Name A–Z</option>
+            <option value="copies">Most copies</option>
+            <option value="print">Most on print</option>
+            <option value="ticked">Ticked first</option>
+          </select>
+        </div>
+        <div id="tagBar" class="tag-bar hidden"></div>
+        <div id="bulkCopies" class="bulk-copies">
+          <span id="bulkLabel">Copies for ticked:</span>
+          <button id="bulkMinus" title="One fewer copy of every ticked sticker">−1</button>
+          <input id="bulkCount" type="number" min="0" max="50" value="1" aria-label="Number of copies" />
+          <button id="bulkSet" title="Give every ticked sticker this many copies">Set</button>
+          <button id="bulkPlus" title="One more copy of every ticked sticker">+1</button>
+          <select id="bulkSize" title="Set the size weight of every ticked sticker" aria-label="Size for ticked">
+            <option value="">Size…</option><option value="0.5">½×</option><option value="0.75">¾×</option><option value="1">1×</option>
+            <option value="1.25">1¼×</option><option value="1.5">1½×</option><option value="2">2×</option><option value="3">3×</option>
+          </select>
+        </div>
+        <ul id="library" class="library"></ul>
+        <div id="libraryEmpty" class="empty">No stickers yet — upload or search for images.</div>
+      </section>
+    </aside>
+
+    <!-- CENTER: canvas -->
+    <section class="stage-wrap">
+      <div class="stage-toolbar">
+        <button id="btnGenerate" class="primary">Generate random collage</button>
+        <button id="btnAddText">Add text</button>
+        <span class="spacer"></span>
+        <details class="view-menu" id="viewMenu">
+          <summary class="button" title="Rulers and grid">Grid &amp; rulers</summary>
+          <div class="menu-pop">
+            <label class="check"><input id="rulersToggle" type="checkbox" /> Show rulers</label>
+            <label class="check"><input id="gridToggle" type="checkbox" /> Show grid</label>
+            <label>Grid spacing <select id="gridStep"></select></label>
+            <p class="hint">With “Snap &amp; guides” on, items also snap to the grid lines. The grid is never printed.</p>
+          </div>
+        </details>
+        <label class="check inline" title="Snap to the page edges, centre and other items while dragging, and to straight angles while rotating. Hold Alt to drag freely.">
+          <input id="snapToggle" type="checkbox" checked /> Snap &amp; guides
+        </label>
+        <div class="zoom-ctl" title="Scroll to pan · Ctrl/⌘ + scroll or pinch to zoom · Space + drag or middle-drag to pan">
+          <button id="zoomOut" class="icon-btn" title="Zoom out (Ctrl + −)">−</button>
+          <input id="zoomSlider" type="range" min="0" max="1000" value="500" aria-label="Zoom" />
+          <button id="zoomIn" class="icon-btn" title="Zoom in (Ctrl + +)">+</button>
+          <button id="zoomLabel" class="zoom-label" title="Show at 100% (actual print pixels)">100%</button>
+          <button id="zoomFit" title="Fit the whole page (Ctrl + 0)">Fit</button>
+        </div>
+      </div>
+      <div id="stage" class="stage">
+        <div id="canvasShell" class="canvas-shell">
+          <canvas id="canvas"></canvas>
+        </div>
+        <canvas id="rulerX" class="ruler ruler-x" aria-hidden="true"></canvas>
+        <canvas id="rulerY" class="ruler ruler-y" aria-hidden="true"></canvas>
+        <div class="ruler-corner" aria-hidden="true"></div>
+      </div>
+      <div id="quickBar" class="quick-bar">
+        <button id="qbEditText" class="primary">Edit text</button>
+        <button id="qbDuplicate">Duplicate</button>
+        <button id="qbForward">Forward</button>
+        <button id="qbBackward">Back</button>
+        <button id="qbDelete" class="danger">Delete</button>
+        <button id="qbMore">More…</button>
+      </div>
+      <div class="stage-status">
+        <span id="status">Ready.</span>
+        <span class="ai-note" title="This app's code was written with the help of AI coding tools. No AI image generation is used anywhere: every image on your print is one you uploaded, pasted or picked from an image search.">Built with AI coding assistance · no AI-generated images</span>
+      </div>
+    </section>
+
+    <!-- RIGHT: settings & properties -->
+    <aside class="panel right sheet" data-sheet-panel="print">
+      <section data-collapse="print">
+        <h2 class="collapsible">Print</h2>
+        <label>Size
+          <select id="sizePreset"></select>
+        </label>
+        <div id="physicalFields" class="grid2">
+          <label>Width <input id="physW" type="number" min="1" step="0.1" /></label>
+          <label>Height <input id="physH" type="number" min="1" step="0.1" /></label>
+          <label>Unit
+            <select id="physUnit"><option value="cm">cm</option><option value="in">in</option></select>
+          </label>
+          <label>Resolution (DPI)
+            <select id="dpi">
+              <option value="150">150 – draft</option>
+              <option value="200">200 – large posters</option>
+              <option value="300" selected>300 – photo quality</option>
+            </select>
+          </label>
+        </div>
+        <div id="pixelFields" class="grid2 hidden">
+          <label>Width (px) <input id="pxW" type="number" min="100" step="1" /></label>
+          <label>Height (px) <input id="pxH" type="number" min="100" step="1" /></label>
+        </div>
+        <div class="row gap">
+          <button id="btnOrient" title="Swap width and height">⟲ Portrait / Landscape</button>
+        </div>
+        <p class="hint" id="sizeInfo"></p>
+        <label class="row gap">Background
+          <input id="bgColor" type="color" value="#ffffff" />
+          <button class="link" id="btnBgWhite">reset to white</button>
+        </label>
+      </section>
+
+      <section data-collapse="layout">
+        <h2 class="collapsible">Random layout</h2>
+        <label>Style
+          <select id="genStyle">
+            <option value="scatter">Scatter — spread evenly</option>
+            <option value="pile">Pile — heaped in the middle</option>
+            <option value="packed">Packed — fill the page, no overlaps</option>
+            <option value="grid">Grid — tidy rows</option>
+            <option value="circle">Circle — rings around the centre</option>
+            <option value="shape">Shape — fill a shape</option>
+          </select>
+        </label>
+        <div id="shapeOpts" class="grid2 hidden">
+          <label>Shape
+            <select id="genShape">
+              <option value="heart">Heart</option>
+              <option value="star">Star</option>
+              <option value="circle">Circle</option>
+              <option value="text">Letters / word</option>
+            </select>
+          </label>
+          <label id="shapeTextRow" class="hidden">Text <input id="genShapeText" type="text" maxlength="12" value="LOVE" /></label>
+        </div>
+        <label class="check hidden" id="outwardRow"><input id="genOutward" type="checkbox" checked /> Point stickers outward</label>
+        <label id="sizeRow">Sticker size <span class="val" id="sizeVal"></span>
+          <input id="genSize" type="range" min="5" max="60" value="22" />
+        </label>
+        <label>Size variation <span class="val" id="varVal"></span>
+          <input id="genVar" type="range" min="0" max="80" value="30" />
+        </label>
+        <p class="hint hidden" id="autoSizeNote">This style sizes stickers automatically to fill the space; each sticker's <b>Size</b> weight still applies.</p>
+        <label>Max rotation <span class="val" id="rotVal"></span>
+          <input id="genRot" type="range" min="0" max="180" value="25" />
+        </label>
+        <label id="overlapRow" title="0% keeps stickers apart; 100% ignores spacing">Overlap <span class="val" id="overlapVal"></span>
+          <input id="genOverlap" type="range" min="0" max="100" value="15" />
+        </label>
+        <label title="Empty border around the edge of the print">Margin <span class="val" id="marginVal"></span>
+          <input id="genMargin" type="range" min="0" max="20" value="3" />
+        </label>
+        <label class="check"><input id="genBleed" type="checkbox" /> Let stickers run off the edges</label>
+        <label class="check"><input id="genKeepText" type="checkbox" checked /> Keep text boxes when regenerating</label>
+        <p class="hint">Locked items (lock icon in Layers) always stay where they are. Scatter, Pile, Packed and Shape place new stickers around them; Grid and Circle ignore them.</p>
+      </section>
+
+      <section id="layersPanel" data-collapse="layers">
+        <h2 class="collapsible">Layers <span class="layer-count" id="layerCount"></span></h2>
+        <div class="layer-actions">
+          <button id="lyFront" title="Bring the selection to the very front">⤒ Front</button>
+          <button id="lyForward" title="Bring the selection one step forward">↑ Forward</button>
+          <button id="lyBackward" title="Send the selection one step back">↓ Back</button>
+          <button id="lyBack" title="Send the selection to the very back">⤓ Bottom</button>
+          <button id="lySelectAll" title="Select everything on the print (Ctrl+A)">Select all</button>
+          <button id="lyClear" class="danger" title="Remove everything from the print (can be undone)">Clear print</button>
+        </div>
+        <ul id="layerList" class="layer-list"></ul>
+        <div id="layersEmpty" class="empty">Nothing on the print yet.</div>
+        <p class="hint">Top of the list is the front. Drag <b>⋮⋮</b> to reorder. Click a row to select it; Ctrl/⌘-click or tick boxes to select several, Shift-click for a range. Double-click a sticker's name to rename it.</p>
+      </section>
+
+      <section id="selectionPanel" class="hidden">
+        <h2>Selection</h2>
+        <div id="imageProps">
+          <div class="grid2">
+            <label>Width (<span class="unitLabel">cm</span>) <input id="selW" type="number" step="0.1" min="0.1" /></label>
+            <label>Rotation (°) <input id="selRot" type="number" step="1" /></label>
+          </div>
+          <p class="hint" id="selDpi"></p>
+        </div>
+        <div id="textProps" class="hidden">
+          <label>Font
+            <select id="txtFont">
+              <option>Arial</option>
+              <option>Georgia</option>
+              <option>Times New Roman</option>
+              <option>Courier New</option>
+              <option>Trebuchet MS</option>
+              <option>Impact</option>
+              <option>Comic Sans MS</option>
+              <option>Brush Script MT</option>
+            </select>
+          </label>
+          <div class="grid2">
+            <label>Size (<span id="txtSizeLabel">pt</span>) <input id="txtSize" type="number" min="4" max="1000" step="1" /></label>
+            <label>Color <input id="txtColor" type="color" /></label>
+          </div>
+          <div class="row gap-sm wrap">
+            <button id="txtBold" class="toggle"><b>B</b></button>
+            <button id="txtItalic" class="toggle"><i>I</i></button>
+            <button id="txtUnderline" class="toggle"><u>U</u></button>
+            <button data-align="left" class="txtAlign toggle">Left</button>
+            <button data-align="center" class="txtAlign toggle">Center</button>
+            <button data-align="right" class="txtAlign toggle">Right</button>
+          </div>
+          <div class="grid2">
+            <label>Outline color <input id="txtStroke" type="color" value="#ffffff" /></label>
+            <label>Outline width <input id="txtStrokeW" type="number" min="0" max="50" step="0.5" value="0" /></label>
+          </div>
+        </div>
+        <div class="align-block">
+          <div class="align-label" id="alignLabel">Align to page</div>
+          <div class="align-grid">
+            <button class="alignBtn" data-align="left" title="Align left edges">⇤ Left</button>
+            <button class="alignBtn" data-align="hcenter" title="Align centres horizontally">↔ Centre</button>
+            <button class="alignBtn" data-align="right" title="Align right edges">Right ⇥</button>
+            <button class="alignBtn" data-align="top" title="Align top edges">⤒ Top</button>
+            <button class="alignBtn" data-align="vcenter" title="Align centres vertically">↕ Middle</button>
+            <button class="alignBtn" data-align="bottom" title="Align bottom edges">Bottom ⤓</button>
+            <button class="alignBtn" data-align="distH" title="Space 3+ items evenly left to right">Space ↔</button>
+            <button class="alignBtn" data-align="distV" title="Space 3+ items evenly top to bottom">Space ↕</button>
+          </div>
+        </div>
+        <div class="row gap-sm wrap">
+          <button id="selFlipH" title="Mirror horizontally">Flip ↔</button>
+          <button id="selFlipV" title="Mirror vertically">Flip ↕</button>
+          <button id="selForward" title="Bring forward">Forward</button>
+          <button id="selBackward" title="Send backward">Backward</button>
+          <button id="selDuplicate">Duplicate</button>
+          <button id="selCopies" title="Select every copy of this sticker on the print">Select all copies</button>
+          <button id="selDelete" class="danger">Delete</button>
+        </div>
+        <p class="hint">Drag to move, corner handles to resize, top handle to rotate. Hold Shift while resizing to stretch. Delete/Backspace removes.</p>
+      </section>
+    </aside>
+    <aside id="layersSheet" class="panel sheet sheet-only" data-sheet-panel="layers"></aside>
+    <aside id="editSheet" class="panel sheet sheet-only" data-sheet-panel="edit"></aside>
+  </main>
+
+  <nav id="mobileNav" class="mobile-nav">
+    <button data-sheet="stickers">Stickers</button>
+    <button data-sheet="print">Print</button>
+    <button data-sheet="layers">Layers</button>
+    <button data-sheet="edit" disabled>Edit</button>
+  </nav>
+
+  <!-- Sticker editor -->
+  <dialog id="editorDialog" class="modal wide">
+    <div class="modal-head">
+      <h2>Edit sticker</h2>
+      <button class="icon" data-close>✕</button>
+    </div>
+    <div class="editor-body">
+      <div class="editor-preview checker">
+        <div id="cropHost" class="crop-host"><img id="cropImg" alt="" /></div>
+        <canvas id="edCanvas" class="ed-canvas"></canvas>
+        <div id="edZoomBar" class="ed-zoom" title="Ctrl/⌘ + scroll or pinch to zoom · scroll, drag, Space + drag or two fingers to pan">
+          <button id="edZoomOut" title="Zoom out (Ctrl + −)">−</button>
+          <button id="edZoomLabel" title="Show at 100% (actual pixels)">100%</button>
+          <button id="edZoomIn" title="Zoom in (Ctrl + +)">+</button>
+          <button id="edZoomFit" title="Fit (Ctrl + 0)">Fit</button>
+        </div>
+      </div>
+      <div class="editor-tools">
+        <section>
+          <h3>Crop</h3>
+          <div class="row gap-sm wrap">
+            <button id="edCropStart">Start cropping</button>
+            <select id="edCropRatio" disabled>
+              <option value="NaN">Free</option>
+              <option value="1">1:1</option>
+              <option value="1.3333">4:3</option>
+              <option value="0.75">3:4</option>
+              <option value="1.7778">16:9</option>
+            </select>
+            <button id="edCropApply" class="primary" disabled>Apply crop</button>
+            <button id="edCropCancel" disabled>Cancel</button>
+          </div>
+        </section>
+        <section>
+          <h3>Remove background</h3>
+          <div class="row gap-sm wrap">
+            <button id="edBgAuto">Automatic (subject detection)</button>
+          </div>
+          <p class="hint">Runs a segmentation model in your browser to cut out the main subject. Nothing is generated or uploaded; the model (~40 MB) downloads once.</p>
+          <div class="row gap-sm wrap">
+            <button id="edBgPick">Click a color to remove</button>
+            <label class="inline">Tolerance <input id="edTol" type="range" min="1" max="120" value="40" /></label>
+            <label class="check inline"><input id="edContig" type="checkbox" checked /> Connected only</label>
+          </div>
+          <p class="hint">Good for plain or studio backgrounds: click the background in the preview.</p>
+        </section>
+        <section>
+          <h3>Erase &amp; cut by hand</h3>
+          <div class="row gap-sm wrap">
+            <button id="edEraseStart" class="toggle">Rubber</button>
+            <button id="edLassoStart" class="toggle">Draw to crop</button>
+          </div>
+          <label id="edBrushRow" class="hidden">Brush size <span class="val" id="edBrushVal">30 px</span>
+            <input id="edBrush" type="range" min="4" max="150" value="30" />
+          </label>
+          <p class="hint" id="edToolHint"></p>
+          <div id="edToolActions" class="row gap-sm wrap hidden">
+            <button id="edStrokeUndo">Undo stroke</button>
+            <button id="edLassoBack" title="Remove the last point (Backspace)">Remove last point</button>
+            <button id="edLassoClear">Clear</button>
+            <button id="edToolApply" class="primary">Apply</button>
+            <button id="edToolCancel">Cancel</button>
+          </div>
+        </section>
+        <section>
+          <h3>Outline</h3>
+          <label class="check"><input id="edOutline" type="checkbox" /> Add outline (die-cut sticker look)</label>
+          <div class="grid2">
+            <label>Thickness <input id="edOutlineW" type="range" min="1" max="12" value="4" /></label>
+            <label>Color <input id="edOutlineC" type="color" value="#ffffff" /></label>
+          </div>
+          <p class="hint">Works best after removing the background — the outline follows the transparent edge.</p>
+        </section>
+        <section>
+          <div class="row gap-sm wrap">
+            <button id="edUndo">Undo step</button>
+            <button id="edReset" class="danger">Reset to original</button>
+          </div>
+        </section>
+        <div id="edBusy" class="busy hidden"><span class="spinner"></span><span id="edBusyText">Working…</span></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button data-close>Cancel</button>
+      <button id="edSave" class="primary">Save sticker</button>
+    </div>
+  </dialog>
+
+  <!-- Image search -->
+  <dialog id="searchDialog" class="modal wide">
+    <div class="modal-head">
+      <h2>Find images online</h2>
+      <button class="icon" data-close>✕</button>
+    </div>
+    <form id="searchForm" class="row gap">
+      <input id="searchQuery" type="search" placeholder="e.g. vintage botanical illustration" required />
+      <select id="searchProvider">
+        <option value="openverse">Openverse (openly licensed)</option>
+        <option value="google">Google Images</option>
+      </select>
+      <button class="primary" type="submit">Search</button>
+    </form>
+    <p class="hint" id="searchNote">Click images to select them, then add them to your stickers. Check each image's license before printing.</p>
+    <div id="searchResults" class="search-grid"></div>
+    <div class="modal-foot">
+      <button id="searchMore" disabled>Load more</button>
+      <span class="spacer"></span>
+      <span id="searchSelCount" class="hint">0 selected</span>
+      <button id="searchAdd" class="primary" disabled>Add to stickers</button>
+    </div>
+  </dialog>
+
+  <!-- Export -->
+  <dialog id="exportDialog" class="modal">
+    <div class="modal-head">
+      <h2>Export print</h2>
+      <button class="icon" data-close>✕</button>
+    </div>
+    <p id="exportInfo"></p>
+    <label>Format
+      <select id="exportFormat">
+        <option value="png">PNG (lossless)</option>
+        <option value="jpeg">JPEG (smaller file)</option>
+      </select>
+    </label>
+    <p class="hint" id="exportWarn"></p>
+    <div class="modal-foot">
+      <button data-close>Cancel</button>
+      <button id="exportGo" class="primary">Download</button>
+    </div>
+  </dialog>
+
+  <div id="dropOverlay" class="drop-overlay hidden">Drop images to add stickers</div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
