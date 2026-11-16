@@ -343,3 +343,16 @@ section.collapsed > :not(h2) { display: none !important; }
 .ruler-x { top: 0; left: 0; }
 .ruler-y { top: 0; left: 0; }
 .ruler-corner { position: absolute; top: 0; left: 0; width: 20px; height: 20px; z-index: 6; background: var(--panel); border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); font-size: 9px; color: var(--muted); display: grid; place-items: center; pointer-events: none; }
+
+/* editor: extra sections */
+.ed-more { padding-bottom: 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+.ed-more > summary { cursor: pointer; font-weight: 600; font-size: 14px; margin-bottom: 8px; list-style: none; }
+.ed-more > summary::-webkit-details-marker { display: none; }
+.ed-more > summary::before { content: "▸ "; font-size: 11px; color: var(--muted); }
+.ed-more[open] > summary::before { content: "▾ "; }
+.ed-more > summary .hint { font-weight: 400; margin-left: 4px; }
+.ed-more.active > summary::after { content: " ●"; color: var(--accent); font-size: 10px; }
+.seg { display: inline-flex; margin: 6px 0; }
+.seg button { border-radius: 0; }
+.seg button:first-child { border-radius: 6px 0 0 6px; }
+.seg button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }

@@ -2,7 +2,10 @@
  * Libraries (global): fabric (canvas editing), Cropper (cropping).
  * Background removal (optional): @imgly/background-removal, loaded on demand.
  */
-import { removeColorAt, trimTransparent, renderWithOutline, insertDpiMetadata } from './imaging.js';
+import {
+  removeColorAt, trimTransparent, renderSticker, lookNeedsRender, insertDpiMetadata,
+  DEFAULT_ADJUST, DEFAULT_MASK, DEFAULT_EDGES, DEFAULT_SHADOW,
+} from './imaging.js';
 import { encodeProjectFile, decodeProjectFile, autosaveWrite, autosaveRead, autosaveClear } from './project.js';
 import { computeLayout, AUTO_SIZE_STYLES, OVERLAP_STYLES } from './layouts.js';
 
@@ -391,9 +394,34 @@ function updateCanvasStatus() {
   $('#status').textContent = `${s} sticker${s === 1 ? '' : 's'} and ${t} text box${t === 1 ? '' : 'es'} on the print.`;
 }
 
+/** The parts of a sticker's look that change its pixels (rendered by renderSticker). */
+const lookOf = (x) => ({ outline: x.outline, adjust: x.adjust, mask: x.mask, edges: x.edges });
+/** Fresh copies of a sticker's look settings, with defaults filled in for older projects. */
+function lookCopies(x) {
+  return {
+    adjust: { ...DEFAULT_ADJUST, ...(x.adjust || {}) },
+    mask: { ...DEFAULT_MASK, ...(x.mask || {}) },
+    edges: { ...DEFAULT_EDGES, ...(x.edges || {}) },
+    shadow: { ...DEFAULT_SHADOW, ...(x.shadow || {}) },
+  };
+}
+/** Drop shadow for a sticker on the print. Sizes are relative to the sticker, so every copy matches,
+ *  and the canvas keeps the light direction fixed when a copy is rotated. */
+function stickerShadow(item, img) {
+  const sh = item.shadow;
+  if (!sh?.on) return null;
+  const size = Math.max(img.width, img.height);
+  const d = (sh.dist / 100) * size, a = (sh.angle * Math.PI) / 180;
+  return new fabric.Shadow({
+    color: `rgba(0,0,0,${sh.opacity / 100})`, blur: (sh.blur / 100) * size,
+    offsetX: Math.cos(a) * d, offsetY: Math.sin(a) * d, affectStroke: false,
+  });
+}
+
 function makeStickerObject(item, opts = {}) {
   const img = new fabric.Image(item.finalImg, { originX: 'center', originY: 'center', ...opts });
   img.stickerId = item.id;
+  img.shadow = stickerShadow(item, item.finalImg);
   img.setControlsVisibility({ mt: false, mb: false, ml: false, mr: false });
   return img;
 }
@@ -1393,7 +1421,7 @@ const library = [];
 
 async function addToLibrary({ url, w, h }, name, tags = []) {
   const item = {
-    id: newId(), name: name || 'Image', steps: [{ url, w, h }], outline: { on: false, w: 4, c: '#ffffff' },
+    id: newId(), name: name || 'Image', steps: [{ url, w, h, ox: 0, oy: 0 }], outline: { on: false, w: 4, c: '#ffffff' }, ...lookCopies({}),
     finalUrl: url, finalImg: await loadImage(url), use: true, count: 1, size: 1, tags: [],
   };
   if (tags.length) addTags(item, tags.join(','));
@@ -1605,7 +1633,7 @@ let flashId = null; // briefly highlight a newly made duplicate
 function duplicateSticker(item) {
   const copy = {
     ...item, id: newId(), name: item.name + ' (copy)',
-    steps: item.steps.map((st) => ({ ...st })), outline: { ...item.outline }, tags: [...(item.tags || [])],
+    steps: item.steps.map((st) => ({ ...st })), outline: { ...item.outline }, ...lookCopies(item), tags: [...(item.tags || [])],
   };
   library.splice(library.indexOf(item) + 1, 0, copy);
   flashId = copy.id;
@@ -1744,10 +1772,11 @@ let tool = null;                  // rubber / draw-to-crop session
 function edCurrent() { return ed.steps[ed.steps.length - 1]; }
 
 async function openEditor(item) {
-  ed = { item, steps: item.steps.slice(), outline: { ...item.outline }, cropper: null, busy: false, mode: 'view', baseImg: null };
+  ed = { item, steps: item.steps.slice(), outline: { ...item.outline }, ...lookCopies(item), cropper: null, busy: false, mode: 'view', baseImg: null };
   $('#edOutline').checked = ed.outline.on;
   $('#edOutlineW').value = ed.outline.w;
   $('#edOutlineC').value = ed.outline.c;
+  writeLookControls();
   endCrop();
   setPicking(false);
   edDialog.showModal();
@@ -1777,10 +1806,10 @@ function updateDisplaySource(quickFirst) {
   const token = ++srcToken;
   if (!ed?.baseImg) return;
   if (tool) { ev.src = { canvas: tool.work, x: 0, y: 0, w: ev.imgW, h: ev.imgH }; drawEd(); return; }
-  const outline = ed.mode === 'pick' ? { on: false } : ed.outline;
-  if (!outline.on) { ev.src = { canvas: ed.baseImg, x: 0, y: 0, w: ev.imgW, h: ev.imgH }; drawEd(); return; }
+  const look = ed.mode === 'pick' ? {} : lookOf(ed); // colour picking needs the plain pixels
+  if (!lookNeedsRender(look)) { ev.src = { canvas: ed.baseImg, x: 0, y: 0, w: ev.imgW, h: ev.imgH }; drawEd(); return; }
   const make = (maxSide) => {
-    const c = renderWithOutline(ed.baseImg, outline, maxSide);
+    const c = renderSticker(ed.baseImg, look, maxSide);
     const s = maxSide ? Math.min(1, maxSide / Math.max(ev.imgW, ev.imgH)) : 1;
     const pad = (c.width - Math.round(ev.imgW * s)) / 2; // outline margin, in rendered pixels
     return { canvas: c, x: -pad / s, y: -pad / s, w: c.width / s, h: c.height / s };
@@ -1804,10 +1833,21 @@ function setBusy(on, text = 'Working…') {
 }
 
 /** Add an edit step. When transparent edges are trimmed, the view is shifted so the image doesn't jump. */
-async function pushStep(c, trim = false) {
+/** Where step i sits inside the original image (step 0), or null if unknown (older projects). */
+function stepOrigin(i) {
+  if (i === 0) return { ox: 0, oy: 0 };
+  const st = ed.steps[i];
+  return st.ox === undefined ? null : { ox: st.ox, oy: st.oy };
+}
+async function pushStep(c, trim = false, shift = null) {
   const out = trim ? trimTransparent(c) : c;
   if (out.trimOffset && !ev.fit) { ev.ox += out.trimOffset.x * ev.z; ev.oy += out.trimOffset.y * ev.z; }
-  ed.steps.push({ url: await canvasToUrl(out), w: out.width, h: out.height });
+  const prev = stepOrigin(ed.steps.length - 1);
+  const origin = prev && {
+    ox: prev.ox + (shift?.x || 0) + (out.trimOffset?.x || 0),
+    oy: prev.oy + (shift?.y || 0) + (out.trimOffset?.y || 0),
+  };
+  ed.steps.push({ url: await canvasToUrl(out), w: out.width, h: out.height, ...(origin || {}) });
   await refreshPreview();
 }
 
@@ -1901,14 +1941,23 @@ function drawEd() {
       ctx.scale(z, z);
       ctx.imageSmoothingEnabled = z < 3; // show real pixels when zoomed far in
       ctx.imageSmoothingQuality = 'high';
+      if (!tool && ed.mode !== 'pick' && ed.shadow?.on) {
+        // shadow offsets/blur ignore the transform, so they're given in device pixels
+        const sh = ed.shadow, size = Math.max(s.w, s.h), a = (sh.angle * Math.PI) / 180, k = z * dpr;
+        ctx.shadowColor = `rgba(0,0,0,${sh.opacity / 100})`;
+        ctx.shadowBlur = (sh.blur / 100) * size * k;
+        ctx.shadowOffsetX = Math.cos(a) * (sh.dist / 100) * size * k;
+        ctx.shadowOffsetY = Math.sin(a) * (sh.dist / 100) * size * k;
+      }
       ctx.drawImage(s.canvas, s.x, s.y, s.w, s.h);
+      ctx.shadowColor = 'transparent';
       if (tool?.kind === 'lasso') drawLasso(ctx);
       ctx.restore();
     }
     if (tool?.kind === 'erase' && ev.hover && !ev.gesture && !ev.panDrag && !ev.space) {
       const r = Number($('#edBrush').value) / 2;
       ctx.lineWidth = 1.5;
-      ctx.strokeStyle = 'rgba(0,0,0,.8)';
+      ctx.strokeStyle = tool.brushMode === 'restore' ? 'rgba(20,140,60,.95)' : 'rgba(0,0,0,.8)';
       ctx.beginPath(); ctx.arc(ev.hover.x, ev.hover.y, r, 0, Math.PI * 2); ctx.stroke();
       ctx.strokeStyle = 'rgba(255,255,255,.9)';
       ctx.beginPath(); ctx.arc(ev.hover.x, ev.hover.y, Math.max(1, r - 1.5), 0, Math.PI * 2); ctx.stroke();
@@ -2018,10 +2067,11 @@ $('#edCropStart').addEventListener('click', () => {
 $('#edCropRatio').addEventListener('change', (e) => ed?.cropper?.setAspectRatio(Number(e.target.value)));
 $('#edCropCancel').addEventListener('click', endCrop);
 $('#edCropApply').addEventListener('click', async () => {
-  const c = ed.cropper.getCroppedCanvas({ imageSmoothingQuality: 'high' });
+  const data = ed.cropper.getData(true);
+  const c = ed.cropper.getCroppedCanvas({ width: data.width, height: data.height, imageSmoothingQuality: 'high' });
   endCrop();
   ev.fit = true;
-  await pushStep(c);
+  await pushStep(c, false, { x: data.x, y: data.y });
 });
 
 // ---- automatic background removal (subject segmentation, runs locally in the browser)
@@ -2059,12 +2109,69 @@ function onOutlineChange() {
 }
 ['#edOutline', '#edOutlineW', '#edOutlineC'].forEach((s) => $(s).addEventListener('input', onOutlineChange));
 
+// shape, edges, colour, shadow — all non-destructive, previewed live
+const LOOK_PIXEL_INPUTS = ['#edMaskShape', '#edMaskRadius', '#edSmooth', '#edShrink', '#edFeather', '#edSpecks',
+  '#edBright', '#edContrast', '#edSat', '#edBW', '#edTint', '#edTintAmt'];
+const LOOK_SHADOW_INPUTS = ['#edShadow', '#edShadowDist', '#edShadowBlur', '#edShadowOpacity', '#edShadowAngle'];
+function readLookControls() {
+  ed.mask = { shape: $('#edMaskShape').value, radius: +$('#edMaskRadius').value };
+  ed.edges = { smooth: +$('#edSmooth').value, shrink: +$('#edShrink').value, feather: +$('#edFeather').value, specks: $('#edSpecks').checked };
+  ed.adjust = {
+    brightness: +$('#edBright').value, contrast: +$('#edContrast').value, saturation: +$('#edSat').value,
+    bw: $('#edBW').checked, tint: $('#edTint').value, tintAmt: +$('#edTintAmt').value,
+  };
+  ed.shadow = { on: $('#edShadow').checked, dist: +$('#edShadowDist').value, blur: +$('#edShadowBlur').value, opacity: +$('#edShadowOpacity').value, angle: +$('#edShadowAngle').value };
+}
+function writeLookControls() {
+  $('#edMaskShape').value = ed.mask.shape; $('#edMaskRadius').value = ed.mask.radius;
+  $('#edSmooth').value = ed.edges.smooth; $('#edShrink').value = ed.edges.shrink; $('#edFeather').value = ed.edges.feather; $('#edSpecks').checked = ed.edges.specks;
+  $('#edBright').value = ed.adjust.brightness; $('#edContrast').value = ed.adjust.contrast; $('#edSat').value = ed.adjust.saturation;
+  $('#edBW').checked = ed.adjust.bw; $('#edTint').value = ed.adjust.tint; $('#edTintAmt').value = ed.adjust.tintAmt;
+  $('#edShadow').checked = ed.shadow.on; $('#edShadowDist').value = ed.shadow.dist; $('#edShadowBlur').value = ed.shadow.blur;
+  $('#edShadowOpacity').value = ed.shadow.opacity; $('#edShadowAngle').value = ed.shadow.angle;
+  syncLookLabels();
+}
+function syncLookLabels() {
+  const signed = (v) => (v > 0 ? '+' : '') + v;
+  $('#edMaskRadiusRow').classList.toggle('hidden', ed.mask.shape !== 'rounded');
+  $('#edSmoothVal').textContent = ed.edges.smooth || 'off';
+  $('#edShrinkVal').textContent = ed.edges.shrink || 'off';
+  $('#edFeatherVal').textContent = ed.edges.feather || 'off';
+  $('#edBrightVal').textContent = signed(ed.adjust.brightness);
+  $('#edContrastVal').textContent = signed(ed.adjust.contrast);
+  $('#edSatVal').textContent = ed.adjust.bw ? 'B&W' : signed(ed.adjust.saturation);
+  $('#edTintVal').textContent = ed.adjust.tintAmt ? ed.adjust.tintAmt + '%' : 'off';
+  $('#edSat').disabled = ed.adjust.bw;
+  // a dot on collapsed sections that are doing something
+  $('#edEdgesBox').classList.toggle('active', !!(ed.edges.smooth || ed.edges.shrink || ed.edges.feather || ed.edges.specks));
+  $('#edColorBox').classList.toggle('active', !!(ed.adjust.brightness || ed.adjust.contrast || ed.adjust.saturation || ed.adjust.bw || ed.adjust.tintAmt));
+  $('#edShadowBox').classList.toggle('active', !!ed.shadow.on);
+}
+let lookTimer;
+LOOK_PIXEL_INPUTS.forEach((sel) => $(sel).addEventListener('input', () => {
+  if (!ed) return;
+  readLookControls(); syncLookLabels();
+  clearTimeout(lookTimer);
+  lookTimer = setTimeout(() => updateDisplaySource(true), 60);
+}));
+LOOK_SHADOW_INPUTS.forEach((sel) => $(sel).addEventListener('input', () => {
+  if (!ed) return;
+  readLookControls(); syncLookLabels(); drawEd(); // the shadow is drawn live, no re-render needed
+}));
+$('#edColorReset').addEventListener('click', () => {
+  ed.adjust = { ...DEFAULT_ADJUST };
+  writeLookControls();
+  updateDisplaySource(true);
+});
+
 $('#edUndo').addEventListener('click', async () => {
   if (ed.steps.length > 1) { ed.steps.pop(); endCrop(); ev.fit = true; await refreshPreview(); }
 });
 $('#edReset').addEventListener('click', async () => {
   ed.steps = ed.steps.slice(0, 1);
   ed.outline.on = false; $('#edOutline').checked = false;
+  Object.assign(ed, lookCopies({}));
+  writeLookControls();
   endCrop(); setPicking(false); ev.fit = true; await refreshPreview();
 });
 
@@ -2078,16 +2185,40 @@ async function startTool(kind) {
   const img = ed.baseImg || await loadImage(edCurrent().url);
   tool = {
     kind, base: imageToCanvas(img), work: imageToCanvas(img), strokes: [], current: null, down: false,
-    lasso: null, closed: false, marks: [], press: null,
+    lasso: null, closed: false, marks: [], press: null, brushMode: 'erase', source: null, expand: null,
   };
+  if (kind === 'erase') {
+    // The restore brush paints back pixels from the original image. When the current step is a
+    // smaller part of it (cropped, or trimmed after background removal), the work area grows to the
+    // whole original so areas outside the current edges can be restored too.
+    const org = stepOrigin(ed.steps.length - 1);
+    if (org && ed.steps.length > 1) {
+      const src = await loadImage(ed.steps[0].url);
+      const sw = src.naturalWidth, sh = src.naturalHeight;
+      tool.source = imageToCanvas(src);
+      if (org.ox || org.oy || sw !== ev.imgW || sh !== ev.imgH) {
+        const grow = (from) => { const c = makeCanvas(sw, sh); c.getContext('2d').drawImage(from, org.ox, org.oy); return c; };
+        tool.base = grow(img); tool.work = grow(img);
+        tool.expand = { ox: org.ox, oy: org.oy, w: ev.imgW, h: ev.imgH };
+        ev.ox -= org.ox * ev.z; ev.oy -= org.oy * ev.z; // keep the image where it is on screen
+        ev.imgW = sw; ev.imgH = sh;
+      }
+    } else {
+      tool.source = imageToCanvas(img); // nothing older to go back to: restore undoes this session's erasing
+    }
+  }
   ed.mode = kind;
   setEdCursor();
   syncToolUi();
   updateDisplaySource(false);
 }
 
-function cancelTool() {
+function cancelTool(keepView = false) {
   if (!tool) return;
+  if (tool.expand && !keepView) { // shrink the view back to the current step
+    ev.ox += tool.expand.ox * ev.z; ev.oy += tool.expand.oy * ev.z;
+    ev.imgW = tool.expand.w; ev.imgH = tool.expand.h;
+  }
   tool = null;
   if (ed) { ed.mode = 'view'; setEdCursor(); updateDisplaySource(true); }
   syncToolUi();
@@ -2113,9 +2244,10 @@ async function applyTool() {
     ctx.closePath();
     ctx.fill();
   }
-  cancelTool();
+  const shift = t.expand ? { x: -t.expand.ox, y: -t.expand.oy } : null; // the work area started at the original's corner
+  cancelTool(!!t.expand);
   setBusy(true, 'Applying…');
-  try { await pushStep(out, true); } finally { setBusy(false); }
+  try { await pushStep(out, true, shift); } finally { setBusy(false); }
 }
 
 function syncToolUi() {
@@ -2123,6 +2255,9 @@ function syncToolUi() {
   $('#edEraseStart').classList.toggle('on', kind === 'erase');
   $('#edLassoStart').classList.toggle('on', kind === 'lasso');
   $('#edBrushRow').classList.toggle('hidden', kind !== 'erase');
+  $('#edBrushMode').classList.toggle('hidden', kind !== 'erase');
+  $('#edModeErase').classList.toggle('on', tool?.brushMode !== 'restore');
+  $('#edModeRestore').classList.toggle('on', tool?.brushMode === 'restore');
   $('#edToolActions').classList.toggle('hidden', !kind);
   $('#edStrokeUndo').classList.toggle('hidden', kind !== 'erase');
   $('#edLassoClear').classList.toggle('hidden', kind !== 'lasso');
@@ -2134,7 +2269,9 @@ function syncToolUi() {
     $('#edLassoBack').disabled = !tool?.lasso;
   }
   $('#edToolHint').textContent = kind === 'erase'
-    ? 'Paint over anything you want to remove. Ctrl+Z undoes the last stroke. Zoom in for a finer brush.'
+    ? (tool.brushMode === 'restore'
+      ? 'Paint to bring back the original image — e.g. parts the background removal took away. Hold Alt to erase instead.'
+      : 'Paint over anything you want to remove. Hold Alt (or pick Restore) to paint the original back. Ctrl+Z undoes the last stroke. Zoom in for a finer brush.')
     : kind === 'lasso'
       ? 'Click to place corners — straight lines join them — or press and drag to draw freehand. ' +
         'Close the shape by clicking the first corner, double-clicking or pressing Enter (Apply also closes it). ' +
@@ -2158,11 +2295,29 @@ function eraseStroke(ctx, stroke) {
   ctx.stroke();
   ctx.restore();
 }
+/** Paint the original image back along the stroke. */
+function restoreStroke(ctx, stroke) {
+  const r = stroke.w / 2 + 2;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const p of stroke.pts) { x0 = Math.min(x0, p.x - r); y0 = Math.min(y0, p.y - r); x1 = Math.max(x1, p.x + r); y1 = Math.max(y1, p.y + r); }
+  x0 = Math.max(0, Math.floor(x0)); y0 = Math.max(0, Math.floor(y0));
+  x1 = Math.min(tool.work.width, Math.ceil(x1)); y1 = Math.min(tool.work.height, Math.ceil(y1));
+  if (x1 <= x0 || y1 <= y0) return;
+  const tmp = makeCanvas(x1 - x0, y1 - y0), g = tmp.getContext('2d');
+  g.translate(-x0, -y0);
+  g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = stroke.w; g.strokeStyle = '#000';
+  strokePath(g, stroke.pts); g.stroke();
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.globalCompositeOperation = 'source-in'; // keep the brush shape, fill it with the original
+  g.drawImage(tool.source, -x0, -y0);
+  ctx.drawImage(tmp, x0, y0);
+}
+function applyStroke(ctx, stroke) { if (stroke.mode === 'restore') restoreStroke(ctx, stroke); else eraseStroke(ctx, stroke); }
 function rebuildWork() {
   const ctx = tool.work.getContext('2d');
   ctx.clearRect(0, 0, tool.work.width, tool.work.height);
   ctx.drawImage(tool.base, 0, 0);
-  tool.strokes.forEach((s) => eraseStroke(ctx, s));
+  tool.strokes.forEach((s) => applyStroke(ctx, s));
 }
 
 // lasso: a press that moves draws freehand; a press that doesn't move is a click that adds a corner
@@ -2254,8 +2409,10 @@ edCanvas.addEventListener('pointerdown', (e) => {
       ev.panDrag = { x: p.css.x, y: p.css.y, moved: 0, pickAt: !panButton && ed.mode === 'pick' ? p.img : null };
     } else if (e.button === 0 && tool?.kind === 'erase') {
       tool.down = true;
-      tool.current = { w: Number($('#edBrush').value) / ev.z, pts: [p.img] };
-      eraseStroke(tool.work.getContext('2d'), tool.current);
+      // hold Alt to switch brush mode for one stroke
+      const mode = e.altKey ? (tool.brushMode === 'restore' ? 'erase' : 'restore') : tool.brushMode;
+      tool.current = { mode, w: Number($('#edBrush').value) / ev.z, pts: [p.img] };
+      applyStroke(tool.work.getContext('2d'), tool.current);
     } else if (e.button === 0 && tool?.kind === 'lasso') {
       lassoDown(p);
     }
@@ -2282,7 +2439,7 @@ edCanvas.addEventListener('pointermove', (e) => {
   } else if (tool?.kind === 'erase' && tool.down && tool.current) {
     const pts = tool.current.pts, last = pts[pts.length - 1];
     pts.push(p.img);
-    eraseStroke(tool.work.getContext('2d'), { w: tool.current.w, pts: [last, p.img] });
+    applyStroke(tool.work.getContext('2d'), { mode: tool.current.mode, w: tool.current.w, pts: [last, p.img] });
   } else if (tool?.kind === 'lasso' && tool.press) {
     lassoMove(p);
   }
@@ -2346,7 +2503,9 @@ $('#edEraseStart').addEventListener('click', () => (tool?.kind === 'erase' ? can
 $('#edLassoStart').addEventListener('click', () => (tool?.kind === 'lasso' ? cancelTool() : startTool('lasso')));
 $('#edBrush').addEventListener('input', () => { $('#edBrushVal').textContent = $('#edBrush').value + ' px'; drawEd(); });
 $('#edToolApply').addEventListener('click', applyTool);
-$('#edToolCancel').addEventListener('click', cancelTool);
+$('#edModeErase').addEventListener('click', () => { if (tool) { tool.brushMode = 'erase'; syncToolUi(); } });
+$('#edModeRestore').addEventListener('click', () => { if (tool) { tool.brushMode = 'restore'; syncToolUi(); } });
+$('#edToolCancel').addEventListener('click', () => cancelTool());
 $('#edStrokeUndo').addEventListener('click', () => { if (tool?.strokes.length) { tool.strokes.pop(); rebuildWork(); syncToolUi(); } });
 $('#edLassoClear').addEventListener('click', () => { if (tool) { restoreLasso(null); syncToolUi(); } });
 $('#edLassoBack').addEventListener('click', lassoBack);
@@ -2380,16 +2539,17 @@ $('#edSave').addEventListener('click', async () => {
   try {
     const { item } = ed;
     const base = await loadImage(edCurrent().url);
-    const finalCanvas = renderWithOutline(base, ed.outline, 0);
+    const finalCanvas = renderSticker(base, lookOf(ed), 0, { trim: true });
     const finalUrl = await canvasToUrl(finalCanvas);
     const finalImg = await loadImage(finalUrl);
-    Object.assign(item, { steps: ed.steps, outline: ed.outline, finalUrl, finalImg });
+    Object.assign(item, { steps: ed.steps, outline: ed.outline, adjust: ed.adjust, mask: ed.mask, edges: ed.edges, shadow: ed.shadow, finalUrl, finalImg });
     // update every copy already on the print, keeping its on-print size
     canvas.getObjects().filter((o) => o.stickerId === item.id).forEach((o) => {
       const long = Math.max(o.getScaledWidth(), o.getScaledHeight());
       o.setElement(finalImg);
       const s = long / Math.max(finalImg.width, finalImg.height);
       o.set({ scaleX: s, scaleY: s, dirty: true }); o.setCoords();
+      o.shadow = stickerShadow(item, finalImg);
     });
     canvas.requestRenderAll();
     renderLibrary();
@@ -2650,10 +2810,10 @@ async function serializeProject() {
   const lib = [];
   for (const item of library) {
     const steps = [];
-    for (const st of item.steps) steps.push({ key: await keyFor(st.url), w: st.w, h: st.h });
+    for (const st of item.steps) steps.push({ key: await keyFor(st.url), w: st.w, h: st.h, ox: st.ox, oy: st.oy });
     // the outlined result is slow to re-render, so it's stored too
-    const finalKey = item.outline.on ? await keyFor(item.finalUrl) : null;
-    lib.push({ id: item.id, name: item.name, use: item.use, count: item.count, outline: { ...item.outline }, steps, finalKey, tags: [...(item.tags || [])], size: item.size || 1 });
+    const finalKey = lookNeedsRender(lookOf(item)) ? await keyFor(item.finalUrl) : null;
+    lib.push({ id: item.id, name: item.name, use: item.use, count: item.count, outline: { ...item.outline }, ...lookCopies(item), steps, finalKey, tags: [...(item.tags || [])], size: item.size || 1 });
   }
 
   const meta = {
@@ -2743,13 +2903,13 @@ async function restoreProject(meta, blobs) {
     };
     let maxId = 0;
     for (const s of meta.library) {
-      const steps = s.steps.map((st) => ({ url: urlOf(st.key), w: st.w, h: st.h }));
+      const steps = s.steps.map((st) => ({ url: urlOf(st.key), w: st.w, h: st.h, ox: st.ox, oy: st.oy }));
       let finalUrl = s.finalKey ? urlOf(s.finalKey) : steps[steps.length - 1].url;
-      if (s.outline?.on && !s.finalKey) {
-        finalUrl = await canvasToUrl(renderWithOutline(await loadImage(steps[steps.length - 1].url), s.outline, 0));
+      if (!s.finalKey && lookNeedsRender({ ...lookCopies(s), outline: s.outline })) { // older saves: rebuild the finished look
+        finalUrl = await canvasToUrl(renderSticker(await loadImage(steps[steps.length - 1].url), { ...lookCopies(s), outline: s.outline }, 0, { trim: true }));
       }
       const finalImg = await loadImage(finalUrl);
-      library.push({ id: s.id, name: s.name, use: s.use, count: s.count, outline: { ...s.outline }, steps, finalUrl, finalImg, tags: [...(s.tags || [])], size: s.size || 1 });
+      library.push({ id: s.id, name: s.name, use: s.use, count: s.count, outline: { ...s.outline }, ...lookCopies(s), steps, finalUrl, finalImg, tags: [...(s.tags || [])], size: s.size || 1 });
       maxId = Math.max(maxId, Number(String(s.id).replace(/\D/g, '')) || 0);
     }
     uid = Math.max(uid, maxId);
@@ -2795,7 +2955,7 @@ function snapshotState() {
   library.forEach((i) => imgCache.set(i.finalUrl, i.finalImg));
   return JSON.stringify({
     print: serializePrint(),
-    library: library.map((i) => ({ id: i.id, name: i.name, use: i.use, count: i.count, outline: { ...i.outline },
+    library: library.map((i) => ({ id: i.id, name: i.name, use: i.use, count: i.count, outline: { ...i.outline }, ...lookCopies(i),
       steps: i.steps.map((s) => ({ ...s })), finalUrl: i.finalUrl, tags: [...(i.tags || [])], size: i.size || 1 })),
     objects: serializeObjects(),
   });

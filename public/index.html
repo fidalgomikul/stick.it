@@ -349,6 +349,10 @@
             <button id="edEraseStart" class="toggle">Rubber</button>
             <button id="edLassoStart" class="toggle">Draw to crop</button>
           </div>
+          <div id="edBrushMode" class="seg hidden" role="group" aria-label="Brush mode">
+            <button id="edModeErase" class="toggle on" title="Paint to make parts transparent">Erase</button>
+            <button id="edModeRestore" class="toggle" title="Paint the original image back — e.g. to fix what background removal took away">Restore</button>
+          </div>
           <label id="edBrushRow" class="hidden">Brush size <span class="val" id="edBrushVal">30 px</span>
             <input id="edBrush" type="range" min="4" max="150" value="30" />
           </label>
@@ -361,6 +365,54 @@
             <button id="edToolCancel">Cancel</button>
           </div>
         </section>
+        <section>
+          <h3>Shape</h3>
+          <div class="grid2">
+            <label>Cut into
+              <select id="edMaskShape">
+                <option value="none">Original shape</option>
+                <option value="circle">Circle</option>
+                <option value="oval">Oval</option>
+                <option value="rounded">Rounded rectangle</option>
+                <option value="heart">Heart</option>
+                <option value="star">Star</option>
+              </select>
+            </label>
+            <label id="edMaskRadiusRow" class="hidden">Corner radius <input id="edMaskRadius" type="range" min="2" max="50" value="15" /></label>
+          </div>
+          <p class="hint">Crop first to choose which part ends up inside the shape.</p>
+        </section>
+        <details class="ed-more" id="edEdgesBox">
+          <summary>Edges <span class="hint">clean up a cut-out</span></summary>
+          <label>Smooth <span class="val" id="edSmoothVal"></span><input id="edSmooth" type="range" min="0" max="10" value="0" /></label>
+          <label>Shrink edge <span class="val" id="edShrinkVal"></span><input id="edShrink" type="range" min="0" max="10" value="0" /></label>
+          <label>Feather <span class="val" id="edFeatherVal"></span><input id="edFeather" type="range" min="0" max="10" value="0" /></label>
+          <label class="check"><input id="edSpecks" type="checkbox" /> Remove small leftover specks</label>
+          <p class="hint">Smooth rounds off jagged edges, Shrink drops a halo of old background, Feather softens the edge.</p>
+        </details>
+        <details class="ed-more" id="edColorBox">
+          <summary>Colour</summary>
+          <label>Brightness <span class="val" id="edBrightVal"></span><input id="edBright" type="range" min="-100" max="100" value="0" /></label>
+          <label>Contrast <span class="val" id="edContrastVal"></span><input id="edContrast" type="range" min="-100" max="100" value="0" /></label>
+          <label>Saturation <span class="val" id="edSatVal"></span><input id="edSat" type="range" min="-100" max="100" value="0" /></label>
+          <label class="check"><input id="edBW" type="checkbox" /> Black &amp; white</label>
+          <div class="grid2">
+            <label>Tint strength <span class="val" id="edTintVal"></span><input id="edTintAmt" type="range" min="0" max="100" value="0" /></label>
+            <label>Tint colour <input id="edTint" type="color" value="#e8a33d" /></label>
+          </div>
+          <button id="edColorReset" class="link">Reset colour</button>
+        </details>
+        <details class="ed-more" id="edShadowBox">
+          <summary>Shadow</summary>
+          <label class="check"><input id="edShadow" type="checkbox" /> Drop shadow (sticker lifted off the page)</label>
+          <div class="grid2">
+            <label>Distance <input id="edShadowDist" type="range" min="0" max="10" step="0.5" value="2" /></label>
+            <label>Softness <input id="edShadowBlur" type="range" min="0" max="10" step="0.5" value="3" /></label>
+            <label>Strength <input id="edShadowOpacity" type="range" min="5" max="90" value="35" /></label>
+            <label>Direction <input id="edShadowAngle" type="range" min="0" max="359" value="45" /></label>
+          </div>
+          <p class="hint">The shadow keeps the same light direction for every copy on the print, even when rotated, and is included in the export.</p>
+        </details>
         <section>
           <h3>Outline</h3>
           <label class="check"><input id="edOutline" type="checkbox" /> Add outline (die-cut sticker look)</label>
