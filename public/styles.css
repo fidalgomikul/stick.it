@@ -356,3 +356,13 @@ section.collapsed > :not(h2) { display: none !important; }
 .seg button { border-radius: 0; }
 .seg button:first-child { border-radius: 6px 0 0 6px; }
 .seg button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+
+/* page background */
+.bg-colors { margin-bottom: 10px; flex-wrap: wrap; }
+.bg-label { font-size: 12px; color: var(--muted); min-width: 70px; }
+
+/* layers: groups */
+.ly-expand { border: none; background: none; padding: 0 4px 0 0; min-height: 0 !important; color: var(--muted); font-size: 11px; }
+.ly-group-thumb { outline: 2px solid var(--border); outline-offset: -2px; }
+.layer-row.layer-child { grid-template-columns: 16px 18px 30px 1fr; padding-left: 26px; font-size: 11px; color: var(--muted); background: var(--card); }
+.layer-row.layer-child .ly-thumb { width: 24px; height: 24px; }

@@ -64,7 +64,15 @@ Note: Google has closed the Custom Search JSON API to new customers, so this onl
   - The *Print*, *Random layout* and *Layers* headings collapse when clicked.
 - **Selecting several items:** drag a box on empty space, or Shift/Ctrl/⌘-click on the print. You can also use the Layers list, or *Select all copies* for a sticker. Then move, rotate, align, duplicate or delete them together. Escape deselects.
 - **Editing:** move, resize, rotate, flip, change layer order, duplicate (Ctrl+D) and delete (Del). The arrow keys nudge the selection.
-- **Text boxes:** set the font, size in pt, colour, bold, italic, underline, alignment and an outline.
+- **Text boxes:** set the font, size in pt, colour, bold, italic, underline, alignment, outline and letter spacing.
+  - Fonts: 29 to choose from, including free Google Fonts in serif, sans, handwriting/script, display and typewriter styles. A font downloads the first time it's used, and exports wait for it.
+  - **Curve** bends a line of text into an arc, either ∩ or ∪.
+  - **Label** puts a coloured, rounded tag behind straight text.
+- **Groups:** select several items and press *Group* (Ctrl+G) so they always move, resize and rotate together. *Ungroup* is Ctrl+Shift+G.
+  - Groups appear in Layers with their items listed underneath, and can be renamed by double-clicking.
+  - Regenerating the random layout keeps groups.
+  - Editing a sticker updates its copies inside groups too.
+- **Background:** a solid colour, a two-colour gradient (vertical, horizontal, diagonal or radial), a paper texture (paper grain, linen, canvas or watercolour, generated in the app so no image files are needed), or your own image (fill, fit or tile, with opacity). The background is included in the export and saved with the project.
 - **Print size:** choose a preset (A5–A2, common cm and inch frame sizes), a custom physical size with DPI (150/200/300), or a plain pixel size. Changing the size scales the existing layout to fit.
 - **Export:** PNG or JPEG at full print resolution, with the DPI written into the file. It warns you about stickers enlarged below about 150 DPI.
 
@@ -85,6 +93,7 @@ Note: Google has closed the Custom Search JSON API to new customers, so this onl
 ## Files
 - `server.js`: static server, search endpoint, and an image proxy so exports aren't blocked by CORS.
 - `public/app.js`: UI, canvas (Fabric.js 5), library, editor and export.
+- `public/backgrounds.js`: page backgrounds and generated paper textures.
 - `public/layouts.js`: the layout styles (placement maths only).
 - `public/imaging.js`: colour keying, trimming, outlines and DPI metadata.
 - `public/project.js`: `.collage` file format and the IndexedDB autosave.

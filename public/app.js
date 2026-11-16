@@ -8,6 +8,7 @@ import {
 } from './imaging.js';
 import { encodeProjectFile, decodeProjectFile, autosaveWrite, autosaveRead, autosaveClear } from './project.js';
 import { computeLayout, AUTO_SIZE_STYLES, OVERLAP_STYLES } from './layouts.js';
+import { DEFAULT_BACKGROUND, paintBackground } from './backgrounds.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -173,6 +174,75 @@ function writePrintFields() {
   $('#pxW').value = print.pxW; $('#pxH').value = print.pxH;
 }
 
+// ---- page background beyond a plain colour (see backgrounds.js)
+print.background = { ...DEFAULT_BACKGROUND };
+let bgImage = null; // loaded <img> for print.background.imageUrl
+function bgImageReady() {
+  const url = print.background.type === 'image' && print.background.imageUrl;
+  if (!url) return null;
+  if (bgImage && bgImage._url === url) return bgImage.complete && bgImage.naturalWidth ? bgImage : null;
+  bgImage = new Image();
+  bgImage._url = url;
+  bgImage.onload = () => canvas.requestRenderAll();
+  bgImage.src = url;
+  return null;
+}
+async function bgImageLoaded() {
+  if (print.background.type !== 'image' || !print.background.imageUrl) return;
+  bgImageReady();
+  if (!bgImage.complete) await new Promise((r) => { bgImage.addEventListener('load', r, { once: true }); bgImage.addEventListener('error', r, { once: true }); });
+}
+/** Textures keep the same physical size whatever the DPI. */
+const textureScale = () => (print.mode === 'pixels' ? 1 : print.dpi / 300);
+function paintPage(ctx) {
+  paintBackground(ctx, print.background, print.bg, print.W, print.H, { image: bgImageReady(), texScale: textureScale() });
+}
+function syncBackgroundUi() {
+  const b = print.background;
+  $('#bgType').value = b.type;
+  $('#bgColor2Wrap').classList.toggle('hidden', b.type !== 'gradient');
+  $('#bgGradOpts').classList.toggle('hidden', b.type !== 'gradient');
+  $('#bgTexOpts').classList.toggle('hidden', b.type !== 'texture');
+  $('#bgImgOpts').classList.toggle('hidden', b.type !== 'image');
+  $('#bgColor2').value = b.color2; $('#bgGradDir').value = b.gradDir;
+  $('#bgTexture').value = b.texture; $('#bgTexStrength').value = b.texStrength;
+  $('#bgImageFit').value = b.imageFit; $('#bgImageOpacity').value = b.imageOpacity;
+  $('#bgImageName').textContent = b.imageUrl ? (b.imageName || 'Image chosen') : 'No image chosen yet';
+  $('#bgColorLabel').textContent = { solid: 'Colour', gradient: 'From / to', texture: 'Paper colour', image: 'Colour behind' }[b.type];
+}
+function setBgProp(key, value, kind) {
+  print.background = { ...print.background, [key]: value };
+  syncBackgroundUi();
+  canvas.requestRenderAll();
+  markDirty(kind);
+}
+$('#bgType').addEventListener('change', (e) => setBgProp('type', e.target.value));
+$('#bgColor2').addEventListener('input', (e) => setBgProp('color2', e.target.value, 'continuous'));
+$('#bgColor2').addEventListener('change', () => markDirty());
+$('#bgGradDir').addEventListener('change', (e) => setBgProp('gradDir', e.target.value));
+$('#bgTexture').addEventListener('change', (e) => setBgProp('texture', e.target.value));
+$('#bgTexStrength').addEventListener('input', (e) => setBgProp('texStrength', +e.target.value, 'continuous'));
+$('#bgTexStrength').addEventListener('change', () => markDirty());
+$('#bgImageFit').addEventListener('change', (e) => setBgProp('imageFit', e.target.value));
+$('#bgImageOpacity').addEventListener('input', (e) => setBgProp('imageOpacity', +e.target.value, 'continuous'));
+$('#bgImageOpacity').addEventListener('change', () => markDirty());
+$('#bgImageInput').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  status('Loading the background image…', true);
+  try {
+    const src = URL.createObjectURL(f);
+    const norm = await normalizeSource(src, f);
+    if (norm.url !== src) URL.revokeObjectURL(src);
+    print.background = { ...print.background, type: 'image', imageUrl: norm.url, imageName: f.name };
+    syncBackgroundUi();
+    canvas.requestRenderAll();
+    markDirty();
+    status('Background image set.');
+  } catch { status('Could not read that image.'); }
+});
+
 function setBackground(color, kind) {
   print.bg = color;
   canvas.requestRenderAll();
@@ -243,7 +313,11 @@ canvas.clearContext = function (ctx) {
   ctx.fillRect(0, 0, this.width, this.height);
   ctx.shadowColor = pageShadow; ctx.shadowBlur = 18; ctx.shadowOffsetY = 3;
   ctx.fillStyle = print.bg;
-  ctx.fillRect(v[4], v[5], print.W * v[0], print.H * v[3]);
+  ctx.fillRect(v[4], v[5], print.W * v[0], print.H * v[3]); // casts the page shadow
+  ctx.restore();
+  ctx.save();
+  ctx.transform(v[0], v[1], v[2], v[3], v[4], v[5]);
+  paintPage(ctx); // gradient / texture / image, in print pixels
   ctx.restore();
   drawGrid(ctx);
   return this;
@@ -389,7 +463,7 @@ const isSticker = (o) => o && o.type === 'image' && o.stickerId;
 const isText = (o) => o && (o.type === 'textbox' || o.type === 'i-text');
 
 function updateCanvasStatus() {
-  const objs = canvas.getObjects();
+  const objs = allLeafObjects();
   const s = objs.filter(isSticker).length, t = objs.filter(isText).length;
   $('#status').textContent = `${s} sticker${s === 1 ? '' : 's'} and ${t} text box${t === 1 ? '' : 'es'} on the print.`;
 }
@@ -506,6 +580,177 @@ function addText() {
 }
 $('#btnAddText').addEventListener('click', addText);
 
+// ---------------------------------------------------------------- fonts
+// A curated set of free Google Fonts plus common system fonts. The stylesheet only tells the browser
+// where the fonts are; a font file is downloaded the first time it's used.
+const FONT_GROUPS = [
+  { label: 'Sans serif', fonts: ['Inter', 'Montserrat', 'Poppins', 'Oswald', 'Bebas Neue', 'Arial', 'Trebuchet MS'] },
+  { label: 'Serif', fonts: ['Playfair Display', 'Merriweather', 'Lora', 'DM Serif Display', 'Georgia', 'Times New Roman'] },
+  { label: 'Handwriting & script', fonts: ['Caveat', 'Dancing Script', 'Pacifico', 'Great Vibes', 'Satisfy', 'Shadows Into Light', 'Amatic SC', 'Permanent Marker'] },
+  { label: 'Display', fonts: ['Abril Fatface', 'Lobster', 'Righteous', 'Bungee', 'Fredoka', 'Impact'] },
+  { label: 'Typewriter', fonts: ['Courier Prime', 'Courier New'] },
+];
+const SYSTEM_FONTS = new Set(['Arial', 'Trebuchet MS', 'Georgia', 'Times New Roman', 'Impact', 'Courier New', 'Comic Sans MS', 'Brush Script MT']);
+const WEB_FONTS = new Set(FONT_GROUPS.flatMap((g) => g.fonts).filter((f) => !SYSTEM_FONTS.has(f)));
+const BOLD_FONTS = new Set(['Inter', 'Montserrat', 'Poppins', 'Oswald', 'Playfair Display', 'Merriweather', 'Lora', 'Caveat', 'Dancing Script', 'Amatic SC', 'Fredoka', 'Courier Prime']);
+(function loadFontStylesheet() {
+  const fams = [...WEB_FONTS].map((f) => 'family=' + f.replace(/ /g, '+') + (BOLD_FONTS.has(f) ? ':wght@400;700' : '')).join('&');
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = `https://fonts.googleapis.com/css2?${fams}&display=swap`;
+  document.head.appendChild(link);
+})();
+(function fillFontSelect() {
+  const sel = $('#txtFont');
+  sel.innerHTML = '';
+  for (const g of FONT_GROUPS) {
+    const og = document.createElement('optgroup');
+    og.label = g.label;
+    for (const f of g.fonts) { const o = new Option(f, f); o.style.fontFamily = `"${f}"`; og.appendChild(o); }
+    sel.appendChild(og);
+  }
+})();
+
+/** Make sure the given fonts are loaded, then re-measure the text that uses them. */
+async function ensureFonts(families) {
+  const need = [...new Set(families)].filter((f) => WEB_FONTS.has(f));
+  if (!need.length) return;
+  await Promise.all(need.flatMap((f) => [
+    document.fonts.load(`400 40px "${f}"`),
+    BOLD_FONTS.has(f) ? document.fonts.load(`700 40px "${f}"`) : null,
+  ].filter(Boolean))).catch(() => { /* offline: the browser falls back to a similar font */ });
+  need.forEach((f) => fabric.util.clearFabricFontCache(f));
+  for (const t of allLeafObjects().filter(isText)) {
+    if (!need.includes(t.fontFamily)) continue;
+    t.initDimensions();
+    if (t.curve) applyCurve(t);
+    t.setCoords(); t.dirty = true;
+    if (t.group) t.group.addWithUpdate();
+  }
+  canvas.requestRenderAll();
+}
+const textFontsInUse = () => allLeafObjects().filter(isText).map((t) => t.fontFamily);
+
+// ---------------------------------------------------------------- curved text & labels
+/** Custom text settings that are saved, copied and undone along with the text. */
+const TEXT_PROPS = ['curve', 'labelOn', 'labelColor', 'labelRadius', 'labelPad'];
+const CLONE_PROPS = ['stickerId', 'locked', 'groupName', ...TEXT_PROPS];
+
+// Text on a path: Fabric doesn't wrap or size a Textbox for that, so do it here.
+const textboxWrap = fabric.Textbox.prototype._wrapText;
+fabric.Textbox.prototype._wrapText = function (lines, desiredWidth) {
+  return textboxWrap.call(this, lines, this.path ? 1e7 : desiredWidth); // curved text is one unbroken line
+};
+const textboxInit = fabric.Textbox.prototype.initDimensions;
+fabric.Textbox.prototype.initDimensions = function () {
+  textboxInit.call(this);
+  if (this.path) {
+    // the box must hold the letters standing on the arc, not just the arc (or they get clipped)
+    const m = this.fontSize * this.lineHeight * 1.1;
+    this.width = this.path.width + 2 * m; this.height = this.path.height + 2 * m;
+  }
+};
+// Label: a rounded, padded tag drawn behind the text (instead of Fabric's plain background box).
+const textBackground = fabric.Textbox.prototype._renderBackground;
+fabric.Textbox.prototype._renderBackground = function (ctx) {
+  if (!this.labelOn || this.path) return textBackground.call(this, ctx);
+  const pad = ((this.labelPad ?? 35) / 100) * this.fontSize;
+  const w = this.width + 2 * pad, h = this.height + 2 * pad;
+  const r = Math.min(w, h) / 2 * ((this.labelRadius ?? 20) / 50);
+  ctx.save();
+  ctx.fillStyle = this.labelColor || '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(-w / 2 + r, -h / 2);
+  ctx.arcTo(w / 2, -h / 2, w / 2, h / 2, r); ctx.arcTo(w / 2, h / 2, -w / 2, h / 2, r);
+  ctx.arcTo(-w / 2, h / 2, -w / 2, -h / 2, r); ctx.arcTo(-w / 2, -h / 2, w / 2, -h / 2, r);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+};
+/** Labels reach past the text's own box, so they're drawn without Fabric's (clipping) cache. */
+function syncLabelCaching(t) { t.objectCaching = !t.labelOn; t.dirty = true; }
+
+/**
+ * Bend a text along an arc. curve: −100…100 (0 = straight; positive bends like ∩, negative like ∪;
+ * ±100 is nearly a full circle). The arc's length matches the text's length so letters keep their spacing.
+ */
+function applyCurve(t) {
+  const c = t.curve || 0;
+  t.set({ path: null });
+  if (!c) { t.initDimensions(); t.setCoords(); return; }
+  if (t.text.includes('\n')) t.set('text', t.text.replace(/\s*\n\s*/g, ' ')); // one line only
+  t.initDimensions();
+  t.set({ width: 1e5 }); t.initDimensions(); // measure the unwrapped line
+  const L = Math.max(1, t.getLineWidth(0));
+  const theta = (Math.abs(c) / 100) * 2 * Math.PI * 0.95;
+  const R = L / theta, half = theta / 2;
+  const sx = R * Math.sin(half), cy = R * Math.cos(half), large = theta > Math.PI ? 1 : 0;
+  const d = c > 0
+    ? `M ${-sx} ${-cy} A ${R} ${R} 0 ${large} 1 ${sx} ${-cy}`   // over the top: ∩
+    : `M ${-sx} ${cy} A ${R} ${R} 0 ${large} 0 ${sx} ${cy}`;    // under the bottom: ∪
+  t.set({ path: new fabric.Path(d, { visible: false, fill: '', stroke: '' }), pathAlign: 'center', pathSide: 'left', pathStartOffset: 0 });
+  t.initDimensions();
+  t.setCoords();
+  t.dirty = true;
+}
+canvas.on('text:changed', (e) => { if (e.target?.curve) { applyCurve(e.target); canvas.requestRenderAll(); } });
+
+// ---------------------------------------------------------------- groups
+const isGroup = (o) => !!o && o.type === 'group';
+/** Every sticker and text on the print, including those inside groups. */
+const allLeafObjects = () => canvas.getObjects().flatMap((o) => (isGroup(o) ? o.getObjects() : [o]));
+function setupGroup(g) {
+  g.setControlsVisibility({ mt: false, mb: false, ml: false, mr: false }); // keep proportions
+  g.subTargetCheck = false;
+}
+
+/** Turn the current multi-selection into a permanent group, keeping its place in the stacking order. */
+function groupSelection() {
+  const a = canvas.getActiveObject();
+  if (!a || a.type !== 'activeSelection') return;
+  const members = a.getObjects();
+  const top = Math.max(...members.map((o) => canvas.getObjects().indexOf(o)));
+  const g = a.toGroup();
+  setupGroup(g);
+  canvas.moveTo(g, top - members.length + 1);
+  canvas.setActiveObject(g);
+  canvas.requestRenderAll();
+  afterGroupChange(`Grouped ${members.length} items. They now move, resize and rotate together.`);
+}
+/** Break a group back into separate items (left selected, in the same stacking position). */
+function ungroupSelection() {
+  const g = canvas.getActiveObject();
+  if (!isGroup(g)) return;
+  const at = canvas.getObjects().indexOf(g);
+  const children = g.getObjects();
+  const sel = g.toActiveSelection();
+  children.forEach((o, k) => canvas.moveTo(o, at + k));
+  canvas.setActiveObject(sel);
+  canvas.requestRenderAll();
+  afterGroupChange(`Ungrouped ${children.length} items.`);
+}
+function afterGroupChange(msg) {
+  markDirty();
+  syncGroupButtons(); // Fabric switches the selection without firing selection events
+  refreshSelectionPanel();
+  updateMobileSelectionUi();
+  queueLayers(true);
+  updateCanvasStatus();
+  status(msg);
+}
+function syncGroupButtons() {
+  const a = canvas.getActiveObject();
+  const canGroup = a?.type === 'activeSelection', canUngroup = isGroup(a);
+  $('#selGroup').classList.toggle('hidden', !canGroup);
+  $('#selUngroup').classList.toggle('hidden', !canUngroup);
+  $('#qbGroup').classList.toggle('hidden', !(canGroup || canUngroup));
+  $('#qbGroup').textContent = canUngroup ? 'Ungroup' : 'Group';
+}
+['selection:created', 'selection:updated', 'selection:cleared'].forEach((ev) => canvas.on(ev, syncGroupButtons));
+$('#selGroup').addEventListener('click', groupSelection);
+$('#selUngroup').addEventListener('click', ungroupSelection);
+$('#qbGroup').addEventListener('click', () => (isGroup(canvas.getActiveObject()) ? ungroupSelection() : groupSelection()));
+
 // ---------------------------------------------------------------- selection panel
 
 function activeObjects() { return canvas.getActiveObjects(); }
@@ -530,6 +775,17 @@ function refreshSelectionPanel() {
     $('#txtBold').classList.toggle('on', single.fontWeight === 'bold');
     $('#txtItalic').classList.toggle('on', single.fontStyle === 'italic');
     $('#txtUnderline').classList.toggle('on', !!single.underline);
+    $('#txtSpacing').value = single.charSpacing || 0;
+    $('#txtSpacingVal').textContent = single.charSpacing ? (single.charSpacing > 0 ? '+' : '') + single.charSpacing : 'normal';
+    $('#txtCurve').value = single.curve || 0;
+    $('#txtCurveVal').textContent = single.curve ? (single.curve > 0 ? '∩ ' : '∪ ') + Math.abs(single.curve) : 'straight';
+    $('#txtLabel').checked = !!single.labelOn;
+    $('#txtLabel').disabled = !!single.curve;
+    $('#txtLabelRow').title = single.curve ? 'Labels work on straight text — set Curve to 0 first' : '';
+    $('#txtLabelOpts').classList.toggle('hidden', !single.labelOn || !!single.curve);
+    $('#txtLabelColor').value = toHex(single.labelColor || '#ffffff');
+    $('#txtLabelRadius').value = single.labelRadius ?? 20;
+    $('#txtLabelPad').value = single.labelPad ?? 35;
     $$('.txtAlign').forEach((b) => b.classList.toggle('on', b.dataset.align === single.textAlign));
   } else {
     $('#selW').value = +(single.getScaledWidth() / pxPerUnit()).toFixed(print.mode === 'pixels' ? 0 : 1);
@@ -605,13 +861,17 @@ function duplicateSelection() {
     o.clone((c) => {
       c.set({ left: o.left + offset, top: o.top + offset });
       if (isSticker(o)) { c.stickerId = o.stickerId; c.setControlsVisibility({ mt: false, mb: false, ml: false, mr: false }); }
+      if (isGroup(c)) setupGroup(c);
+      for (const leaf of isGroup(c) ? c.getObjects() : [c]) {
+        if (isText(leaf)) { syncLabelCaching(leaf); if (leaf.curve) applyCurve(leaf); }
+      }
       canvas.add(c); clones.push(c);
       if (--pending === 0) {
         const sel = clones.length === 1 ? clones[0] : new fabric.ActiveSelection(clones, { canvas });
         canvas.setActiveObject(sel); canvas.requestRenderAll(); updateCanvasStatus();
         releaseHistory();
       }
-    });
+    }, CLONE_PROPS);
   });
 }
 
@@ -619,9 +879,23 @@ function duplicateSelection() {
 function withText(fn, kind) {
   const o = activeObjects()[0];
   if (!isText(o)) return;
-  fn(o); o.setCoords(); canvas.requestRenderAll(); markDirty(kind);
+  fn(o);
+  if (o.curve) applyCurve(o); // size/font/spacing change the arc's length
+  o.setCoords(); canvas.requestRenderAll(); markDirty(kind);
 }
-$('#txtFont').addEventListener('change', (e) => withText((t) => t.set('fontFamily', e.target.value)));
+$('#txtFont').addEventListener('change', (e) => {
+  withText((t) => t.set('fontFamily', e.target.value));
+  ensureFonts([e.target.value]).then(refreshSelectionPanel); // re-measure once the font has downloaded
+});
+$('#txtSpacing').addEventListener('input', (e) => { withText((t) => t.set('charSpacing', +e.target.value), 'continuous'); refreshSelectionPanel(); });
+$('#txtSpacing').addEventListener('change', () => markDirty());
+$('#txtCurve').addEventListener('input', (e) => { withText((t) => { t.curve = +e.target.value; if (!t.curve) applyCurve(t); }, 'continuous'); refreshSelectionPanel(); });
+$('#txtCurve').addEventListener('change', () => markDirty());
+$('#txtLabel').addEventListener('change', (e) => { withText((t) => { t.labelOn = e.target.checked; syncLabelCaching(t); }); refreshSelectionPanel(); });
+$('#txtLabelColor').addEventListener('input', (e) => withText((t) => { t.labelColor = e.target.value; t.dirty = true; }, 'continuous'));
+$('#txtLabelRadius').addEventListener('input', (e) => withText((t) => { t.labelRadius = +e.target.value; t.dirty = true; }, 'continuous'));
+$('#txtLabelPad').addEventListener('input', (e) => withText((t) => { t.labelPad = +e.target.value; t.dirty = true; }, 'continuous'));
+['#txtLabelColor', '#txtLabelRadius', '#txtLabelPad'].forEach((sel) => $(sel).addEventListener('change', () => markDirty()));
 $('#txtSize').addEventListener('change', (e) => withText((t) => {
   const ptFactor = print.mode === 'pixels' ? 1 : 72 / print.dpi;
   t.set({ fontSize: Math.max(1, Number(e.target.value) / ptFactor / t.scaleY) });
@@ -646,6 +920,7 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelection(); }
   else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelection(); }
   else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') { e.preventDefault(); selectObjects(layerObjects()); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'g') { e.preventDefault(); if (e.shiftKey) ungroupSelection(); else groupSelection(); }
   else if (e.key === 'Escape' && active) { canvas.discardActiveObject(); canvas.requestRenderAll(); }
   else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
   else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
@@ -981,7 +1256,8 @@ function stickerQuality(o) {
 
 function setLocked(o, locked) { o.locked = !!locked; o.selectable = !locked; o.evented = !locked; }
 const canSelect = (o) => o.visible !== false && !o.locked;
-const layerObjects = () => canvas.getObjects().filter((o) => isSticker(o) || isText(o));
+const layerObjects = () => canvas.getObjects().filter((o) => isSticker(o) || isText(o) || isGroup(o));
+const expandedGroups = new WeakSet();
 
 canvas.selectionKey = ['shiftKey', 'ctrlKey', 'metaKey']; // Shift / Ctrl / ⌘ + click adds to the selection on the print too
 
@@ -1051,6 +1327,28 @@ function renderLayers() {
         badge.textContent = q.label; badge.title = q.title; badge.classList.add(q.level);
         if (q.level === 'bad') lowRes++;
       }
+    } else if (isGroup(o)) {
+      const kids = o.getObjects();
+      const firstSticker = kids.find(isSticker);
+      if (firstSticker) {
+        const im = document.createElement('img');
+        im.src = items.get(firstSticker.stickerId)?.finalUrl || ''; im.alt = ''; im.draggable = false;
+        thumb.appendChild(im);
+      } else { thumb.classList.add('ly-text'); thumb.textContent = 'G'; }
+      thumb.classList.add('ly-group-thumb');
+      const open = expandedGroups.has(o);
+      nameEl.innerHTML = '<button class="ly-expand"></button><span class="ly-gname"></span>';
+      nameEl.querySelector('.ly-expand').textContent = open ? '▾' : '▸';
+      nameEl.querySelector('.ly-expand').title = open ? 'Hide the items in this group' : 'Show the items in this group';
+      nameEl.querySelector('.ly-gname').textContent = `${o.groupName || 'Group'} · ${kids.length} items`;
+      nameEl.title = (o.groupName || 'Group') + ' — double-click to rename; Ungroup (Ctrl+Shift+G) to edit items separately';
+      const worst = kids.filter(isSticker).map(stickerQuality).filter(Boolean).sort((a, b) => (a.level === 'bad' ? -1 : 1))[0];
+      if (worst) {
+        const badge = li.querySelector('.ly-badge');
+        badge.textContent = worst.label; badge.title = 'A sticker in this group: ' + worst.title; badge.classList.add(worst.level);
+        if (worst.level === 'bad') lowRes++;
+      }
+      if (open) li.dataset.expand = '1';
     } else {
       thumb.classList.add('ly-text');
       thumb.textContent = 'T';
@@ -1065,6 +1363,25 @@ function renderLayers() {
     lock.title = o.locked ? 'Locked — click to unlock' : 'Lock (can’t be selected or moved on the print)';
     ul.appendChild(li);
     if (selected.has(o) && !firstSel) firstSel = li;
+    if (li.dataset.expand) { // the group's items, front first, indented (clicking one selects the group)
+      for (const k of [...o.getObjects()].reverse()) {
+        const sub = document.createElement('li');
+        sub.className = 'layer-row layer-child' + (selected.has(o) ? ' sel' : '');
+        sub.layerObj = o;
+        sub.innerHTML = '<span></span><span></span><span class="ly-thumb checker"></span><span class="ly-name"></span>';
+        if (isSticker(k)) {
+          const im = document.createElement('img');
+          im.src = items.get(k.stickerId)?.finalUrl || ''; im.alt = ''; im.draggable = false;
+          sub.querySelector('.ly-thumb').appendChild(im);
+          sub.querySelector('.ly-name').textContent = items.get(k.stickerId)?.name || 'Sticker';
+        } else {
+          sub.querySelector('.ly-thumb').classList.add('ly-text');
+          sub.querySelector('.ly-thumb').textContent = 'T';
+          sub.querySelector('.ly-name').textContent = `“${(k.text || '').replace(/\s+/g, ' ').trim().slice(0, 40)}”`;
+        }
+        ul.appendChild(sub);
+      }
+    }
   }
   ul.scrollTop = scrollTop;
   $('#layerCount').textContent = objs.length ? `(${objs.length})` : '';
@@ -1092,6 +1409,11 @@ $('#layerList').addEventListener('click', (e) => {
   const li = e.target.closest('.layer-row');
   if (!li) return;
   const o = li.layerObj;
+  if (e.target.closest('.ly-expand')) {
+    if (expandedGroups.has(o)) expandedGroups.delete(o); else expandedGroups.add(o);
+    queueLayers();
+    return;
+  }
   if (e.target.closest('.ly-eye')) {
     const show = o.visible === false;
     o.visible = show;
@@ -1126,6 +1448,22 @@ $('#layerList').addEventListener('click', (e) => {
 $('#layerList').addEventListener('dblclick', (e) => {
   const nameEl = e.target.closest('.ly-name');
   const li = e.target.closest('.layer-row');
+  if (nameEl && li && isGroup(li.layerObj) && !li.classList.contains('layer-child')) {
+    const g = li.layerObj;
+    const input = document.createElement('input');
+    input.type = 'text'; input.className = 'ly-rename'; input.value = g.groupName || 'Group'; input.maxLength = 60;
+    nameEl.replaceWith(input);
+    input.focus(); input.select();
+    let done = false;
+    const finish = (save) => {
+      if (done) return; done = true;
+      if (save && input.value.trim() && input.value.trim() !== (g.groupName || 'Group')) { g.groupName = input.value.trim().slice(0, 60); markDirty(); }
+      queueLayers();
+    };
+    input.addEventListener('keydown', (k) => { if (k.key === 'Enter') finish(true); else if (k.key === 'Escape') { k.preventDefault(); finish(false); } });
+    input.addEventListener('blur', () => finish(true));
+    return;
+  }
   if (!nameEl || !li || !isSticker(li.layerObj)) return;
   const item = library.find((i) => i.id === li.layerObj.stickerId);
   if (!item) return;
@@ -1451,7 +1789,7 @@ const shownLibrary = () => library.filter((i) => libraryMatches(i, libView.query
 
 function onPrintCounts() {
   const n = {};
-  for (const o of canvas.getObjects()) if (o.stickerId) n[o.stickerId] = (n[o.stickerId] || 0) + 1;
+  for (const o of allLeafObjects()) if (o.stickerId) n[o.stickerId] = (n[o.stickerId] || 0) + 1;
   return n;
 }
 function sortForView(list, onPrint) {
@@ -1658,10 +1996,21 @@ $('#bulkSize').addEventListener('change', (e) => {
 });
 
 function removeFromLibrary(item) {
-  const onCanvas = canvas.getObjects().filter((o) => o.stickerId === item.id);
+  const onCanvas = allLeafObjects().filter((o) => o.stickerId === item.id);
   if (onCanvas.length && !confirm(`Remove this sticker? Its ${onCanvas.length} cop${onCanvas.length === 1 ? 'y' : 'ies'} on the print will be removed too.`)) return;
   canvas.discardActiveObject();
-  onCanvas.forEach((o) => canvas.remove(o));
+  onCanvas.forEach((o) => {
+    const g = o.group;
+    if (!g) { canvas.remove(o); return; }
+    g.removeWithUpdate(o); // copies inside a group leave the group; an emptied group goes too
+    if (!g.getObjects().length) canvas.remove(g);
+    else if (g.getObjects().length === 1) { // a group of one is no group: free the last item in its place
+      const only = g.getObjects()[0], at = canvas.getObjects().indexOf(g);
+      g.removeWithUpdate(only);
+      canvas.remove(g);
+      canvas.insertAt(only, at);
+    }
+  });
   library.splice(library.indexOf(item), 1);
   renderLibrary(); canvas.requestRenderAll(); updateCanvasStatus();
 }
@@ -2544,13 +2893,16 @@ $('#edSave').addEventListener('click', async () => {
     const finalImg = await loadImage(finalUrl);
     Object.assign(item, { steps: ed.steps, outline: ed.outline, adjust: ed.adjust, mask: ed.mask, edges: ed.edges, shadow: ed.shadow, finalUrl, finalImg });
     // update every copy already on the print, keeping its on-print size
-    canvas.getObjects().filter((o) => o.stickerId === item.id).forEach((o) => {
+    const touchedGroups = new Set();
+    allLeafObjects().filter((o) => o.stickerId === item.id).forEach((o) => {
+      if (o.group) touchedGroups.add(o.group);
       const long = Math.max(o.getScaledWidth(), o.getScaledHeight());
       o.setElement(finalImg);
       const s = long / Math.max(finalImg.width, finalImg.height);
       o.set({ scaleX: s, scaleY: s, dirty: true }); o.setCoords();
       o.shadow = stickerShadow(item, finalImg);
     });
+    touchedGroups.forEach((g) => g.addWithUpdate()); // re-fit groups around resized copies
     canvas.requestRenderAll();
     renderLibrary();
     closeEditor();
@@ -2695,13 +3047,16 @@ $('#exportGo').addEventListener('click', async () => {
   btn.disabled = true; btn.textContent = 'Rendering…';
   await new Promise((r) => setTimeout(r, 30));
   try {
+    await ensureFonts(textFontsInUse());
+    await document.fonts.ready;
+    await bgImageLoaded();
     canvas.discardActiveObject(); canvas.requestRenderAll();
     // Rendered at true 1:1 scale; the display canvas is rounded to whole pixels, so crop to the exact print size.
     const v = canvas.viewportTransform;
     const full = canvas.toCanvasElement(1 / zoom, { left: v[4], top: v[5], width: (print.W + 1) * zoom, height: (print.H + 1) * zoom }); // +1 px guards against float rounding; cropped below
     const out = makeCanvas(print.W, print.H);
     const octx = out.getContext('2d');
-    octx.fillStyle = print.bg; octx.fillRect(0, 0, print.W, print.H);
+    paintPage(octx);
     octx.drawImage(full, 0, 0);
     let blob = await canvasToBlob(out, fmt === 'png' ? 'image/png' : 'image/jpeg', 0.95);
     if (print.mode === 'physical') blob = await insertDpiMetadata(blob, print.dpi, fmt);
@@ -2823,12 +3178,32 @@ async function serializeProject() {
     library: lib,
     objects: serializeObjects(),
   };
+  // the background image is stored like sticker images: by key, with its data in the blobs
+  const bgUrl = meta.print.background?.imageUrl;
+  if (bgUrl) {
+    meta.print.background = { ...meta.print.background, imageKey: await keyFor(bgUrl) };
+    delete meta.print.background.imageUrl;
+  }
   return { meta, blobs };
 }
 
 function serializePrint() {
   return { mode: print.mode, w: print.w, h: print.h, unit: print.unit, dpi: print.dpi, pxW: print.pxW, pxH: print.pxH,
-    bg: print.bg, preset: $('#sizePreset').value };
+    bg: print.bg, preset: $('#sizePreset').value, background: { ...print.background } };
+}
+
+/** One sticker or text as plain JSON (positions are relative to its group, if it's in one). */
+function serializeLeaf(o) {
+  if (isSticker(o)) {
+    return { kind: 'sticker', stickerId: o.stickerId, left: o.left, top: o.top, scaleX: o.scaleX, scaleY: o.scaleY,
+      angle: o.angle, flipX: o.flipX, flipY: o.flipY, opacity: o.opacity, originX: o.originX, originY: o.originY,
+      visible: o.visible !== false, locked: !!o.locked };
+  }
+  if (isText(o)) {
+    const { path, ...props } = o.toObject(TEXT_PROPS); // the curve's path is rebuilt from "curve" when loading
+    return { kind: 'text', props, locked: !!o.locked };
+  }
+  return null;
 }
 
 /** Objects on the print, in stacking order, as plain JSON. */
@@ -2837,40 +3212,62 @@ function serializeObjects() {
     // Objects inside a multi-selection store positions relative to it; record page positions instead.
     const groupTransform = canvas._realizeGroupTransformOnObject(o);
     try {
-      if (isSticker(o)) {
-        return { kind: 'sticker', stickerId: o.stickerId, left: o.left, top: o.top, scaleX: o.scaleX, scaleY: o.scaleY,
-          angle: o.angle, flipX: o.flipX, flipY: o.flipY, opacity: o.opacity, originX: o.originX, originY: o.originY,
-          visible: o.visible !== false, locked: !!o.locked };
+      if (isGroup(o)) {
+        return { kind: 'group', name: o.groupName || '', left: o.left, top: o.top, width: o.width, height: o.height,
+          scaleX: o.scaleX, scaleY: o.scaleY, angle: o.angle, flipX: o.flipX, flipY: o.flipY, originX: o.originX, originY: o.originY,
+          opacity: o.opacity, visible: o.visible !== false, locked: !!o.locked, children: o.getObjects().map(serializeLeaf).filter(Boolean) };
       }
-      if (isText(o)) return { kind: 'text', props: o.toObject(), locked: !!o.locked };
-      return null;
+      return serializeLeaf(o);
     } finally {
       canvas._unwindGroupTransformOnObject(o, groupTransform);
     }
   }).filter(Boolean);
 }
 
+function buildLeaf(o, byId) {
+  if (o.kind === 'sticker') {
+    const item = byId.get(o.stickerId);
+    if (!item) return null;
+    const { kind, stickerId, locked, ...props } = o;
+    const obj = makeStickerObject(item, props);
+    setLocked(obj, locked);
+    return obj;
+  }
+  if (o.kind === 'text') {
+    const { type, version, text, path: _p, ...props } = o.props;
+    const obj = new fabric.Textbox(text, props);
+    syncLabelCaching(obj);
+    if (obj.curve) applyCurve(obj);
+    setLocked(obj, o.locked);
+    return obj;
+  }
+  return null;
+}
+
 function addSerializedObjects(objects) {
   const byId = new Map(library.map((i) => [i.id, i]));
   for (const o of objects) {
-    if (o.kind === 'sticker') {
-      const item = byId.get(o.stickerId);
-      if (!item) continue;
-      const { kind, stickerId, locked, ...props } = o;
-      const obj = makeStickerObject(item, props);
-      setLocked(obj, locked);
-      canvas.add(obj);
-    } else if (o.kind === 'text') {
-      const { type, version, text, ...props } = o.props;
-      const obj = new fabric.Textbox(text, props);
-      setLocked(obj, o.locked);
-      canvas.add(obj);
+    if (o.kind === 'group') {
+      const children = o.children.map((c) => buildLeaf(c, byId)).filter(Boolean);
+      if (!children.length) continue;
+      const { kind, children: _c, locked, name, ...props } = o;
+      const g = new fabric.Group(children, props, true); // children keep their positions inside the group
+      g.groupName = name || '';
+      setupGroup(g);
+      setLocked(g, locked);
+      canvas.add(g);
+    } else {
+      const obj = buildLeaf(o, byId);
+      if (obj) canvas.add(obj);
     }
   }
+  ensureFonts(textFontsInUse()); // web fonts may still be downloading
 }
 
 function applyPrintState(p) {
   Object.assign(print, p, { W: 0, H: 0 }); // W/H = 0 → no remapping of objects
+  print.background = { ...DEFAULT_BACKGROUND, ...(p.background || {}) };
+  syncBackgroundUi();
   $('#sizePreset').value = p.preset || (print.mode === 'pixels' ? 'pixels' : 'custom');
   writePrintFields();
   $('#bgColor').value = print.bg;
@@ -2888,7 +3285,13 @@ async function restoreProject(meta, blobs) {
 
     // print & layout settings
     setProjectName(meta.name);
-    applyPrintState(meta.print);
+    const pr = { ...meta.print, background: { ...(meta.print.background || {}) } };
+    if (pr.background.imageKey) {
+      const blob = blobs.get(pr.background.imageKey);
+      pr.background.imageUrl = blob ? registerBlob(blob, pr.background.imageKey) : null;
+      delete pr.background.imageKey;
+    }
+    applyPrintState(pr);
     applyLayoutSettings(meta.layout);
 
     // stickers
@@ -3069,6 +3472,8 @@ $('#btnNewProject').addEventListener('click', async () => {
   clearTimeout(saveTimer);
   resetWorkspace();
   $('#bgColor').value = '#ffffff';
+  print.background = { ...DEFAULT_BACKGROUND };
+  syncBackgroundUi();
   setBackground('#ffffff');
   renderLibrary();
   updateCanvasStatus();
@@ -3109,6 +3514,7 @@ applyTheme();
 
 // ---------------------------------------------------------------- boot
 initPrintUi();
+syncBackgroundUi();
 syncSliderLabels();
 applyViewPrefs();
 setBackground('#ffffff');

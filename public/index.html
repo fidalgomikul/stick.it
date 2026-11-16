@@ -116,6 +116,7 @@
       <div id="quickBar" class="quick-bar">
         <button id="qbEditText" class="primary">Edit text</button>
         <button id="qbDuplicate">Duplicate</button>
+        <button id="qbGroup" class="hidden">Group</button>
         <button id="qbForward">Forward</button>
         <button id="qbBackward">Back</button>
         <button id="qbDelete" class="danger">Delete</button>
@@ -156,10 +157,57 @@
           <button id="btnOrient" title="Swap width and height">⟲ Portrait / Landscape</button>
         </div>
         <p class="hint" id="sizeInfo"></p>
-        <label class="row gap">Background
-          <input id="bgColor" type="color" value="#ffffff" />
-          <button class="link" id="btnBgWhite">reset to white</button>
+        <label>Background
+          <select id="bgType">
+            <option value="solid">Solid colour</option>
+            <option value="gradient">Gradient</option>
+            <option value="texture">Paper texture</option>
+            <option value="image">Image</option>
+          </select>
         </label>
+        <div class="row gap bg-colors">
+          <span id="bgColorLabel" class="bg-label">Colour</span>
+          <input id="bgColor" type="color" value="#ffffff" aria-label="Background colour" />
+          <span id="bgColor2Wrap" class="hidden">→ <input id="bgColor2" type="color" value="#f3d6c6" aria-label="Gradient end colour" /></span>
+          <button class="link" id="btnBgWhite">reset to white</button>
+        </div>
+        <div id="bgGradOpts" class="hidden">
+          <label>Direction
+            <select id="bgGradDir">
+              <option value="v">Top to bottom</option>
+              <option value="h">Left to right</option>
+              <option value="d">Diagonal</option>
+              <option value="r">Radial (from the centre)</option>
+            </select>
+          </label>
+        </div>
+        <div id="bgTexOpts" class="grid2 hidden">
+          <label>Texture
+            <select id="bgTexture">
+              <option value="paper">Paper grain</option>
+              <option value="linen">Linen</option>
+              <option value="canvas">Canvas weave</option>
+              <option value="watercolor">Watercolour wash</option>
+            </select>
+          </label>
+          <label>Strength <input id="bgTexStrength" type="range" min="5" max="100" value="50" /></label>
+        </div>
+        <div id="bgImgOpts" class="hidden">
+          <div class="row gap">
+            <label class="button file-btn">Choose image…<input id="bgImageInput" type="file" accept="image/*" hidden /></label>
+            <span class="hint" id="bgImageName"></span>
+          </div>
+          <div class="grid2">
+            <label>Fit
+              <select id="bgImageFit">
+                <option value="cover">Fill the page (crop)</option>
+                <option value="contain">Fit inside</option>
+                <option value="tile">Tile</option>
+              </select>
+            </label>
+            <label>Opacity <input id="bgImageOpacity" type="range" min="5" max="100" value="100" /></label>
+          </div>
+        </div>
       </section>
 
       <section data-collapse="layout">
@@ -260,6 +308,14 @@
             <label>Outline color <input id="txtStroke" type="color" value="#ffffff" /></label>
             <label>Outline width <input id="txtStrokeW" type="number" min="0" max="50" step="0.5" value="0" /></label>
           </div>
+          <label>Letter spacing <span class="val" id="txtSpacingVal"></span><input id="txtSpacing" type="range" min="-100" max="800" step="10" value="0" /></label>
+          <label title="Bend the text along an arc. Works on a single line.">Curve <span class="val" id="txtCurveVal"></span><input id="txtCurve" type="range" min="-100" max="100" value="0" /></label>
+          <label class="check" id="txtLabelRow"><input id="txtLabel" type="checkbox" /> Label (coloured tag behind the text)</label>
+          <div id="txtLabelOpts" class="grid2 hidden">
+            <label>Label colour <input id="txtLabelColor" type="color" value="#ffffff" /></label>
+            <label>Roundness <input id="txtLabelRadius" type="range" min="0" max="50" value="20" /></label>
+            <label>Padding <input id="txtLabelPad" type="range" min="5" max="120" value="35" /></label>
+          </div>
         </div>
         <div class="align-block">
           <div class="align-label" id="alignLabel">Align to page</div>
@@ -281,6 +337,8 @@
           <button id="selBackward" title="Send backward">Backward</button>
           <button id="selDuplicate">Duplicate</button>
           <button id="selCopies" title="Select every copy of this sticker on the print">Select all copies</button>
+          <button id="selGroup" class="hidden" title="Make the selected items one group that moves together (Ctrl+G)">Group</button>
+          <button id="selUngroup" class="hidden" title="Split the group into separate items (Ctrl+Shift+G)">Ungroup</button>
           <button id="selDelete" class="danger">Delete</button>
         </div>
         <p class="hint">Drag to move, corner handles to resize, top handle to rotate. Hold Shift while resizing to stretch. Delete/Backspace removes.</p>
