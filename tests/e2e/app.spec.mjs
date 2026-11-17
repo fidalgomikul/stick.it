@@ -33,6 +33,27 @@ test('loads cleanly and shows the AI notice', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('logo follows the theme, and the Playful look can be switched on and stays on', async ({ page }) => {
+  const errors = await openApp(page);
+  await expect(page).toHaveTitle('stick.it');
+  const visibleLogo = () => page.evaluate(() => [...document.querySelectorAll('.brand .logo')].filter((i) => getComputedStyle(i).display !== 'none').map((i) => i.getAttribute('src')));
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
+  expect(await visibleLogo()).toEqual(['brand/logo-light.png']);
+  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
+  expect(await visibleLogo()).toEqual(['brand/logo-dark.png']);
+
+  await expect(page.locator('#btnLook')).toHaveText('▢ Classic');
+  await page.click('#btnLook');
+  await expect(page.locator('html')).toHaveAttribute('data-look', 'playful');
+  await page.reload();
+  await page.waitForFunction(() => window.collage && window.collage.print.W > 0);
+  await expect(page.locator('html')).toHaveAttribute('data-look', 'playful'); // remembered
+  await expect(page.locator('#btnLook')).toHaveText('✦ Playful');
+  await page.click('#btnLook');
+  await expect(page.locator('html')).not.toHaveAttribute('data-look', 'playful');
+  expect(errors).toEqual([]);
+});
+
 test('upload, generate a layout, and undo one action at a time', async ({ page }) => {
   const errors = await openApp(page);
   await addImages(page);

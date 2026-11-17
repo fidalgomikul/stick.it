@@ -84,7 +84,15 @@ label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--t
 
 /* top bar */
 .topbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--border); }
-.brand { font-weight: 700; font-size: 16px; letter-spacing: -.01em; }
+.brand { margin: 0; line-height: 0; flex-shrink: 0; }
+.brand .logo { height: 28px; width: auto; display: block; }
+.brand .logo-dark { display: none; }
+:root[data-theme="dark"] .brand .logo-light { display: none; }
+:root[data-theme="dark"] .brand .logo-dark { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .brand .logo-light { display: none; }
+  :root:not([data-theme="light"]) .brand .logo-dark { display: block; }
+}
 .topbar-actions { display: flex; gap: 8px; }
 
 /* layout */
@@ -189,7 +197,7 @@ body { height: 100dvh; }
   :root { --nav-h: 56px; }
   .topbar { padding: 6px 8px; gap: 8px; overflow-x: auto; }
   .topbar > *, .topbar-actions > * { flex-shrink: 0; }
-  .brand { font-size: 14px; }
+  .brand .logo { height: 20px; }
   .project-actions { margin-left: 2px; padding-left: 6px; }
   .save-state { display: none; }
 
@@ -280,7 +288,7 @@ section.collapsed > :not(h2) { display: none !important; }
 .project-name { font: inherit; font-weight: 600; font-size: 14px; width: 200px; padding: 4px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text); text-overflow: ellipsis; }
 .project-name:hover { border-color: var(--border); }
 .project-name:focus { border-color: var(--accent); background: var(--field); outline: none; }
-@media (max-width: 900px) { .project-name { width: 130px; font-size: 13px; } .brand { display: none; } }
+@media (max-width: 900px) { .project-name { width: 130px; font-size: 13px; } }
 
 /* status bar + AI notice */
 .stage-status { display: flex; align-items: center; gap: 12px; }
@@ -415,3 +423,89 @@ section.collapsed > :not(h2) { display: none !important; }
 
 /* offline badge */
 .offline-badge { align-self: center; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #fff1c2; color: #7a5600; }
+
+/* ================================================================ Playful look
+   Switched with the "Classic / Playful" button (data-look="playful" on <html>). Colours come from the
+   stick.it logo's letter tiles; works in both light and dark. Only appearance changes, never layout. */
+:root[data-look="playful"] {
+  --bg: #f3ece1; --panel: #fffaf3; --border: #e4d9c7; --text: #2f2830; --muted: #7a6a6e;
+  --accent: #85343a; --accent-ink: #fff4ea; --danger: #b0352c; --stage: #e3d8c6;
+  --offpage: rgba(227, 216, 198, .6); --page-shadow: rgba(47, 40, 48, .28);
+  --field: #fffdf9; --hover-border: #2f2830; --toggle-on: #f7d9c8;
+  --check-a: #fffdf9; --check-b: #efe6d8; --card: #f8f0e4; --glass: rgba(255, 250, 243, .96);
+  --btn-line: #2f2830; --btn-shadow: #2f2830; --radius: 12px;
+  --ui-font: "Fredoka", "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .18 0 0 0 0 .16 0 0 0 0 .19 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+:root[data-look="playful"][data-theme="dark"] {
+  --bg: #1c191b; --panel: #262124; --border: #3e3539; --text: #f0e6d9; --muted: #ab9b9d;
+  --accent: #f2baa1; --accent-ink: #2f2830; --danger: #ff8f7a; --stage: #131012;
+  --offpage: rgba(19, 16, 18, .62); --page-shadow: rgba(0, 0, 0, .6);
+  --field: #2e282b; --hover-border: #e8dcc6; --toggle-on: #4b3330;
+  --check-a: #2e282b; --check-b: #383135; --card: #2e282b; --glass: rgba(38, 33, 36, .96);
+  --btn-line: #6e5f64; --btn-shadow: #070606;
+  --paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 .95 0 0 0 0 .9 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-look="playful"]:not([data-theme="light"]) {
+    --bg: #1c191b; --panel: #262124; --border: #3e3539; --text: #f0e6d9; --muted: #ab9b9d;
+    --accent: #f2baa1; --accent-ink: #2f2830; --danger: #ff8f7a; --stage: #131012;
+    --offpage: rgba(19, 16, 18, .62); --page-shadow: rgba(0, 0, 0, .6);
+    --field: #2e282b; --hover-border: #e8dcc6; --toggle-on: #4b3330;
+    --check-a: #2e282b; --check-b: #383135; --card: #2e282b; --glass: rgba(38, 33, 36, .96);
+    --btn-line: #6e5f64; --btn-shadow: #070606;
+    --paper: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 .95 0 0 0 0 .9 0 0 0 .05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+}
+
+/* paper-textured surfaces and a "cut here" line under the header */
+[data-look="playful"] .panel, [data-look="playful"] .topbar, [data-look="playful"] .stage-toolbar,
+[data-look="playful"] .stage-status, [data-look="playful"] dialog.modal { background-image: var(--paper); }
+[data-look="playful"] .topbar { border-bottom: 2px dashed var(--border); }
+
+/* rounded type for headings, buttons and the project name */
+[data-look="playful"] button, [data-look="playful"] .button, [data-look="playful"] h2, [data-look="playful"] h3,
+[data-look="playful"] .project-name, [data-look="playful"] dialog.modal h2 { font-family: var(--ui-font); }
+
+/* section headings as little cut-out labels in the logo's tile colours */
+[data-look="playful"] .panel section > h2 {
+  display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 2px; border-radius: 4px;
+  font-size: 12.5px; font-weight: 600; letter-spacing: .05em;
+  background: #2f2830; color: #f2baa1; transform: rotate(-1.5deg); box-shadow: 1px 2px 0 rgba(0, 0, 0, .18);
+}
+[data-look="playful"] .panel section:nth-of-type(5n+2) > h2 { background: #cfaabb; color: #2f2830; transform: rotate(1deg); }
+[data-look="playful"] .panel section:nth-of-type(5n+3) > h2 { background: #3a3110; color: #d3d3c4; transform: rotate(-1deg); }
+[data-look="playful"] .panel section:nth-of-type(5n+4) > h2 { background: #85343a; color: #fbefe4; transform: rotate(1.5deg); }
+[data-look="playful"] .panel section:nth-of-type(5n+5) > h2 { background: #dcdad6; color: #85343a; transform: rotate(-.8deg); }
+
+/* sticker-like buttons with an offset shadow that "press" when clicked */
+[data-look="playful"] button:not(.link):not(.icon):not(.mobile-nav button):not(.tag button), [data-look="playful"] .button {
+  border: 1.5px solid var(--btn-line); border-radius: 10px; box-shadow: 2px 2px 0 var(--btn-shadow); font-weight: 500;
+  transition: transform .08s ease, box-shadow .08s ease;
+}
+[data-look="playful"] button:not(.link):not(.icon):not(.mobile-nav button):not(.tag button):hover:not(:disabled), [data-look="playful"] .button:hover {
+  transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--btn-shadow); border-color: var(--btn-line);
+}
+[data-look="playful"] button:not(.link):not(.icon):not(.mobile-nav button):not(.tag button):active:not(:disabled), [data-look="playful"] .button:active {
+  transform: translate(2px, 2px); box-shadow: 0 0 0 var(--btn-shadow);
+}
+[data-look="playful"] button:disabled { box-shadow: none; }
+[data-look="playful"] button.primary, [data-look="playful"] .button.primary { border-color: var(--btn-line); }
+[data-look="playful"] button.toggle.on, [data-look="playful"] .zoom-ctl button.on { background: var(--toggle-on); border-color: var(--btn-line); }
+[data-look="playful"] input[type=number], [data-look="playful"] input[type=search], [data-look="playful"] input[type=text],
+[data-look="playful"] select { border-radius: 8px; }
+
+/* library thumbnails look like die-cut stickers; project cards sit slightly askew */
+[data-look="playful"] .lib-item { border-radius: 12px; }
+[data-look="playful"] .lib-thumb { background: #fff; padding: 3px; border-radius: 8px; box-shadow: 1px 2px 0 rgba(0, 0, 0, .2); transform: rotate(-2deg); }
+[data-look="playful"] .lib-item:nth-child(even) .lib-thumb { transform: rotate(2deg); }
+[data-look="playful"] .pj-card { box-shadow: 3px 3px 0 var(--border); transition: transform .12s ease; }
+[data-look="playful"] .pj-card:nth-child(odd) { transform: rotate(-.6deg); }
+[data-look="playful"] .pj-card:nth-child(even) { transform: rotate(.5deg); }
+[data-look="playful"] .pj-card:hover { transform: none; }
+[data-look="playful"] dialog.modal { border-radius: 16px; border: 2px solid var(--btn-line); box-shadow: 6px 6px 0 var(--btn-shadow); }
+/* the charcoal label would vanish on a dark panel: invert it there */
+[data-look="playful"][data-theme="dark"] .panel section:nth-of-type(5n+1) > h2 { background: #f2baa1; color: #2f2830; }
+@media (prefers-color-scheme: dark) {
+  [data-look="playful"]:not([data-theme="light"]) .panel section:nth-of-type(5n+1) > h2 { background: #f2baa1; color: #2f2830; }
+}

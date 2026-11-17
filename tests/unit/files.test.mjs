@@ -20,7 +20,7 @@ test('.collage file: project data and images survive a round trip', async () => 
 });
 
 test('.collage file: other files are rejected with a clear message', async () => {
-  await assert.rejects(decodeProjectFile(new Blob(['hello world, not a project'])), /not a Collage Studio project/);
+  await assert.rejects(decodeProjectFile(new Blob(['hello world, not a project'])), /not a stick\.it project/);
 });
 
 test('PDF: valid structure, exact page size and trim box, JPEG embedded intact', async () => {

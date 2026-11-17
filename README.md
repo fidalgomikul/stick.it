@@ -1,4 +1,6 @@
-# Collage Studio
+<p align="center"><img src="public/brand/logo-light.png" alt="stick.it" height="56"></p>
+
+# stick.it
 
 Build a printable sticker collage from your own images (or openly licensed images found online), lay them out randomly, then fine‑tune every sticker by hand.
 
@@ -11,7 +13,7 @@ node server.js
 Open http://localhost:5173. You need Node 18+. The app has no dependencies to install; `npm start` does the same thing.
 
 ### Install it and use it offline
-In Edge or Chrome, click **Install app** in the header, or the install icon in the address bar. Collage Studio then opens in its own window.
+In Edge or Chrome, click **Install app** in the header, or the install icon in the address bar. stick.it then opens in its own window.
 - Once it has been opened once, it works **without internet and even without the server running**: your projects, editing and exporting all work.
 - Image search, pasting web links and automatic background removal need an internet connection, and search needs the server. The *Offline* badge shows when you're offline.
 - Fonts and the background-removal model are kept for offline use after their first use.
@@ -56,7 +58,8 @@ The keys stay on your computer: the browser never sees them. Google Images (`GOO
   Layout settings are saved with the project.
 - **Grid & rulers:** rulers in cm, in or px follow the zoom and highlight the selection. A grid with a choice of spacing is drawn under the stickers and never printed, and with snapping on, items also snap to it. These preferences are remembered in the browser.
 - **Zoom & pan:** the zoom slider, −/+ buttons, *Fit*, and clicking the % to jump to 100% (actual print pixels). With a mouse or trackpad, scroll to pan and Ctrl/⌘ + scroll or a trackpad pinch to zoom at the pointer. Hold Space and drag, or middle-drag, to pan. The shortcuts are Ctrl + = / − / 0. On touch screens, pinch on empty space to zoom and drag empty space with one finger to pan. Anything hanging off the page is dimmed, because it won't print.
-- **Dark mode:** the ◐/☾/☀ button in the header switches between following the system, always dark and always light. The print itself keeps its own colours.
+- **Dark mode:** the ◐/☾/☀ button in the header switches between following the system, always dark and always light. The print itself keeps its own colours. The header logo switches to its light or dark version to match.
+- **Classic or Playful look:** the ▢ Classic / ✦ Playful button next to it changes the look of the app. Playful uses the logo's colours, rounded lettering, little cut-out labels on the panel headings and sticker-like buttons. It works in light and dark, and only the appearance changes: everything stays in the same place. Your choice is remembered.
 - **Licences & credits:** stickers from image search or a pasted link keep their title, creator, licence and source page.
   - A chip under the sticker's name opens the details. It warns about *no derivatives* (cut-outs and edits may not be allowed), *non-commercial* (fine for yourself, not for selling), *share-alike* and unknown licences.
   - Search can be limited to images you may change, or may sell.
@@ -93,7 +96,7 @@ The keys stay on your computer: the browser never sees them. Google Images (`GOO
 
 - **Snap & align:** while dragging, items snap to the page edges and centre and to other items' edges and centres, with magenta guide lines. Rotation snaps to 0°, 45°, 90° and so on when you are within 4°. Hold Alt to drag freely, or turn snapping off with *Snap & guides* in the toolbar. In the Selection panel, one item aligns to the page and several items align to each other. *Space ↔ / ↕* spreads 3 or more items evenly.
 - **Undo / redo:** use the header buttons, Ctrl+Z, or Ctrl+Y / Ctrl+Shift+Z. They cover the print (stickers, text, layout), sticker edits, library changes and print settings. Each action is one step: a move, a delete, a button click, a whole random layout, a whole upload, or *Clear print*. Continuous input counts as one step when it ends: typing (when you leave the text box), dragging a colour picker (when you release it) or holding an arrow key (when you let go). History lasts for the browser session and is limited to 100 steps.
-- **Project name:** click the name next to "Collage Studio" in the header to rename the project. It is saved with the project and shown in the browser tab, and it names downloaded files, for example `Summer-trip-2026.collage` and `Summer-trip-2026-30x40cm-300dpi.png`.
+- **Project name:** click the name next to the stick.it logo in the header to rename the project. It is saved with the project and shown in the browser tab, and it names downloaded files, for example `Summer-trip-2026.collage` and `Summer-trip-2026-30x40cm-300dpi.png`.
 - **Projects:** every collage is kept in the browser and appears under **Projects** with a thumbnail, its size, sticker count and when it was last saved. From there you can open, duplicate, download (.collage) or delete it.
   - *New* starts a fresh collage and keeps the current one in the list.
   - *Open…* imports a .collage file as a new project.
@@ -132,6 +135,7 @@ The end-to-end tests start their own server on port 5174 and use a fresh browser
 - `public/layouts.js`: the layout styles (placement maths only).
 - `public/imaging.js`: colour keying, trimming, outlines and DPI metadata.
 - `public/project.js`: the `.collage` file format and browser storage (projects, collections, shared images).
+- `public/brand/`: the stick.it logo, one version for light mode and one for dark mode.
 - `public/sw.js`: the service worker that makes the app work offline; `public/manifest.webmanifest` and `public/icons/` make it installable.
 - `public/vendor/`: Fabric.js and Cropper.js, bundled for offline use (MIT, see its README).
 - `scripts/make-icons.mjs`: draws the app icons (no dependencies).

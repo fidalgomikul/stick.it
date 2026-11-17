@@ -44,7 +44,7 @@ export async function jpegToPdf(jpeg, o) {
   obj(5, `<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
   const d = new Date(), p2 = (n) => String(n).padStart(2, '0');
   const stamp = `D:${d.getUTCFullYear()}${p2(d.getUTCMonth() + 1)}${p2(d.getUTCDate())}${p2(d.getUTCHours())}${p2(d.getUTCMinutes())}${p2(d.getUTCSeconds())}Z`;
-  obj(6, `<< /Title ${pdfString(o.title || 'Collage')} /Producer (Collage Studio) /CreationDate (${stamp}) >>`);
+  obj(6, `<< /Title ${pdfString(o.title || 'Collage')} /Producer (stick.it) /CreationDate (${stamp}) >>`);
 
   const xref = pos;
   let table = 'xref\n0 7\n0000000000 65535 f \n';

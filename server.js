@@ -1,4 +1,4 @@
-// Collage Studio — tiny zero-dependency dev server.
+// stick.it — tiny zero-dependency dev server.
 // Serves the static app from ./public and provides helper endpoints:
 //   GET /api/search?provider=…&q=…&page=1  → image search, results in one common format with licence info
 //   GET /api/proxy?url=…                    → fetches a remote image so the browser can use it on a canvas
@@ -20,7 +20,7 @@ const path = require('path');
 const PORT = Number(process.env.PORT) || 5173;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_PROXY_BYTES = 25 * 1024 * 1024;
-const UA = 'CollageStudio/0.1 (local dev)';
+const UA = 'stick.it/0.1 (local dev)';
 const PAGE_SIZE = 20;
 
 const MIME = {
@@ -119,7 +119,7 @@ async function searchWikimedia(q, page, filters) {
   });
 }
 
-const utm = (u) => u && `${u}${u.includes('?') ? '&' : '?'}utm_source=collage_studio&utm_medium=referral`; // Unsplash asks for these on links
+const utm = (u) => u && `${u}${u.includes('?') ? '&' : '?'}utm_source=stick_it&utm_medium=referral`; // Unsplash asks for these on links
 
 async function searchUnsplash(q, page) {
   const url = new URL('https://api.unsplash.com/search/photos');
@@ -265,5 +265,5 @@ http.createServer((req, res) => {
   if (reqUrl.pathname === '/api/unsplash-download') return handleUnsplashDownload(reqUrl, res);
   return handleStatic(reqUrl, res);
 }).listen(PORT, () => {
-  console.log(`Collage Studio running at http://localhost:${PORT}`);
+  console.log(`stick.it running at http://localhost:${PORT}`);
 });

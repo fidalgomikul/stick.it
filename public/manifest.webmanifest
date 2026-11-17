@@ -1,12 +1,12 @@
 {
-  "name": "Collage Studio",
-  "short_name": "Collage",
+  "name": "stick.it",
+  "short_name": "stick.it",
   "description": "Make printable sticker collages from your own images. No AI image generation.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "background_color": "#f3f2ef",
-  "theme_color": "#2f6fde",
+  "theme_color": "#2f2830",
   "icons": [
     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },

@@ -3,19 +3,20 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Collage Studio</title>
+  <title>stick.it</title>
   <link rel="stylesheet" href="vendor/cropper.min.css" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <meta name="theme-color" content="#2f6fde" />
+  <meta name="theme-color" content="#2f2830" />
   <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="stylesheet" href="styles.css" />
-  <script>try { var t = localStorage.getItem('collage.theme'); if (t && t !== 'auto') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
+  <script>try { var t = localStorage.getItem('collage.theme'); if (t && t !== 'auto') document.documentElement.setAttribute('data-theme', t);
+    if (localStorage.getItem('collage.look') === 'playful') document.documentElement.setAttribute('data-look', 'playful'); } catch (e) {}</script>
 </head>
 <body>
   <header class="topbar">
     <div class="row gap">
-      <div class="brand">Collage Studio</div>
+      <h1 class="brand"><img class="logo logo-light" src="brand/logo-light.png" alt="stick.it" width="546" height="112" /><img class="logo logo-dark" src="brand/logo-dark.png" alt="stick.it" width="546" height="112" /></h1>
       <input id="projectName" class="project-name" type="text" maxlength="80" value="Untitled collage" aria-label="Project name" spellcheck="false" />
       <div class="row gap-sm project-actions">
         <button id="btnProjects" class="ghost" title="All your collages in this browser">Projects</button>
@@ -28,7 +29,8 @@
     </div>
     <div class="topbar-actions">
       <span id="offlineBadge" class="offline-badge hidden" title="No internet: image search is unavailable, everything else works">Offline</span>
-      <button id="btnInstall" class="ghost hidden" title="Install Collage Studio as an app that opens in its own window and works offline">Install app</button>
+      <button id="btnInstall" class="ghost hidden" title="Install stick.it as an app that opens in its own window and works offline">Install app</button>
+      <button id="btnLook" class="ghost" title="Look">▢ Classic</button>
       <button id="btnTheme" class="ghost" title="Theme">◐ Auto</button>
       <button id="btnUndo" class="ghost" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
       <button id="btnRedo" class="ghost" title="Redo (Ctrl+Y / Ctrl+Shift+Z)" disabled>↷ Redo</button>

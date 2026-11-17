@@ -1,4 +1,4 @@
-/* Collage Studio — first draft.
+/* stick.it — collage print maker.
  * Libraries (global): fabric (canvas editing), Cropper (cropping).
  * Background removal (optional): @imgly/background-removal, loaded on demand.
  */
@@ -3374,7 +3374,7 @@ function setProjectName(name) {
   projectName = (name || '').trim().slice(0, 80) || DEFAULT_PROJECT_NAME;
   $('#projectName').value = projectName;
   $('#projectName').title = projectName + ' — click to rename';
-  document.title = projectName === DEFAULT_PROJECT_NAME ? 'Collage Studio' : `${projectName} — Collage Studio`;
+  document.title = projectName === DEFAULT_PROJECT_NAME ? 'stick.it' : `${projectName} — stick.it`;
 }
 /** File-name-safe version of the project name ("Summer trip 2026!" → "Summer-trip-2026"). */
 function projectSlug() {
@@ -3542,7 +3542,7 @@ function applyPrintState(p) {
 
 /** Replace the current collage with a saved one. */
 async function restoreProject(meta, blobs) {
-  if (!meta || meta.app !== 'collage-studio') throw new Error('Not a Collage Studio project.');
+  if (!meta || meta.app !== 'collage-studio') throw new Error('Not a stick.it project.');
   if (meta.version > PROJECT_VERSION) throw new Error('This project was saved by a newer version of the app.');
   persistReady = false;
   try {
@@ -4143,6 +4143,34 @@ $('#btnTheme').addEventListener('click', () => {
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readThemeColors);
 applyTheme();
 
+// Look: "Classic" (the original clean layout) or "Playful" (colours, rounded type and sticker-like
+// buttons taken from the stick.it logo). Only styles change; it works with both light and dark.
+const LOOK_LABEL = { classic: '▢ Classic', playful: '✦ Playful' };
+let look = 'classic';
+try { look = localStorage.getItem('collage.look') === 'playful' ? 'playful' : 'classic'; } catch { /* ignore */ }
+function applyLook() {
+  if (look === 'playful') {
+    document.documentElement.setAttribute('data-look', 'playful');
+    ensureUiFont();
+  } else document.documentElement.removeAttribute('data-look');
+  $('#btnLook').textContent = LOOK_LABEL[look];
+  $('#btnLook').title = 'Look: ' + look + ' (click to switch between Classic and Playful)';
+  readThemeColors();
+}
+function ensureUiFont() {
+  if (document.getElementById('uiFont')) return;
+  const l = document.createElement('link');
+  l.id = 'uiFont'; l.rel = 'stylesheet';
+  l.href = 'https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600&display=swap'; // kept for offline use by the service worker
+  document.head.appendChild(l);
+}
+$('#btnLook').addEventListener('click', () => {
+  look = look === 'playful' ? 'classic' : 'playful';
+  try { localStorage.setItem('collage.look', look); } catch { /* ignore */ }
+  applyLook();
+});
+applyLook();
+
 // ---------------------------------------------------------------- offline & install
 // The service worker (sw.js) keeps the app usable offline. Browsers only allow it on https or
 // localhost, so it's skipped when the app is opened over the local network (http://<pc-ip>:5173).
@@ -4169,7 +4197,7 @@ $('#btnInstall').addEventListener('click', async () => {
   const { outcome } = await installPrompt.userChoice;
   installPrompt = null;
   $('#btnInstall').classList.add('hidden');
-  if (outcome === 'accepted') status('Installed. Collage Studio now opens in its own window and works offline.');
+  if (outcome === 'accepted') status('Installed. stick.it now opens in its own window and works offline.');
 });
 window.addEventListener('appinstalled', () => $('#btnInstall').classList.add('hidden'));
 

@@ -29,7 +29,7 @@ export function encodeProjectFile(meta, blobs) {
 
 export async function decodeProjectFile(file) {
   const head = new Uint8Array(await file.slice(0, 12).arrayBuffer());
-  if (new TextDecoder().decode(head.subarray(0, 8)) !== MAGIC) throw new Error('This is not a Collage Studio project file.');
+  if (new TextDecoder().decode(head.subarray(0, 8)) !== MAGIC) throw new Error('This is not a stick.it project file.');
   const len = new DataView(head.buffer).getUint32(8);
   const header = JSON.parse(new TextDecoder().decode(await file.slice(12, 12 + len).arrayBuffer()));
   const base = 12 + len;
