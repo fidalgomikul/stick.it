@@ -9,6 +9,7 @@ import {
 import { encodeProjectFile, decodeProjectFile, autosaveWrite, autosaveRead, autosaveClear } from './project.js';
 import { computeLayout, AUTO_SIZE_STYLES, OVERLAP_STYLES } from './layouts.js';
 import { DEFAULT_BACKGROUND, paintBackground } from './backgrounds.js';
+import { jpegToPdf } from './pdf.js';
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -194,8 +195,13 @@ async function bgImageLoaded() {
 }
 /** Textures keep the same physical size whatever the DPI. */
 const textureScale = () => (print.mode === 'pixels' ? 1 : print.dpi / 300);
+/** Paint the background over the page plus any bleed (in print pixels; the page starts at 0,0). */
 function paintPage(ctx) {
-  paintBackground(ctx, print.background, print.bg, print.W, print.H, { image: bgImageReady(), texScale: textureScale() });
+  const b = bleedPx();
+  ctx.save();
+  ctx.translate(-b, -b);
+  paintBackground(ctx, print.background, print.bg, print.W + 2 * b, print.H + 2 * b, { image: bgImageReady(), texScale: textureScale() });
+  ctx.restore();
 }
 function syncBackgroundUi() {
   const b = print.background;
@@ -278,6 +284,7 @@ function applyPrintSize() {
   queueLayers(); // DPI badges depend on the print size
   refreshGridOptions();
   syncLayoutUi();
+  syncGuidesUi();
 }
 
 // ---------------------------------------------------------------- canvas
@@ -313,7 +320,8 @@ canvas.clearContext = function (ctx) {
   ctx.fillRect(0, 0, this.width, this.height);
   ctx.shadowColor = pageShadow; ctx.shadowBlur = 18; ctx.shadowOffsetY = 3;
   ctx.fillStyle = print.bg;
-  ctx.fillRect(v[4], v[5], print.W * v[0], print.H * v[3]); // casts the page shadow
+  const bl = bleedPx();
+  ctx.fillRect(v[4] - bl * v[0], v[5] - bl * v[3], (print.W + 2 * bl) * v[0], (print.H + 2 * bl) * v[3]); // casts the page shadow
   ctx.restore();
   ctx.save();
   ctx.transform(v[0], v[1], v[2], v[3], v[4], v[5]);
@@ -329,9 +337,10 @@ canvas.on('after:render', (opt) => {
   const v = canvas.viewportTransform;
   ctx.save();
   ctx.fillStyle = offPageColor;
+  const bl = bleedPx(); // the bleed is printed too, so it isn't dimmed
   ctx.beginPath();
   ctx.rect(0, 0, canvas.width, canvas.height);
-  ctx.rect(v[4], v[5], print.W * v[0], print.H * v[3]);
+  ctx.rect(v[4] - bl * v[0], v[5] - bl * v[3], (print.W + 2 * bl) * v[0], (print.H + 2 * bl) * v[3]);
   ctx.fill('evenodd');
   ctx.restore();
 });
@@ -340,7 +349,8 @@ const ZOOM_SLIDER_MAX = 1000;
 const zoomMin = () => Math.min(0.01, fitZoomValue() * 0.5);
 function fitZoomValue() {
   const pad = Math.max(isNarrowScreen() ? 14 : 32, view.rulers ? RULER + 12 : 0);
-  return Math.max(0.002, Math.min((canvas.width - 2 * pad) / print.W, (canvas.height - 2 * pad) / print.H));
+  const e = print.guides ? pageExtras() : 0;
+  return Math.max(0.002, Math.min((canvas.width - 2 * pad) / (print.W + 2 * e), (canvas.height - 2 * pad) / (print.H + 2 * e)));
 }
 function isNarrowScreen() { return window.matchMedia('(max-width: 900px)').matches; }
 
@@ -964,6 +974,7 @@ const rectOf = (o) => {
 function collectSnapTargets(moving) {
   const grid = gridLines();
   const xs = [0, print.W / 2, print.W, ...grid.xs], ys = [0, print.H / 2, print.H, ...grid.ys];
+  if (print.guides.safe) { const sm = print.guides.safeMm * pxPerMm(); xs.push(sm, print.W - sm); ys.push(sm, print.H - sm); }
   for (const o of canvas.getObjects()) {
     if (moving.has(o) || !o.visible) continue;
     const r = rectOf(o);
@@ -1714,6 +1725,151 @@ function drawAxis(ctx, len, origin, pageLen, ppu, major, minor, div, selRange, c
 }
 canvas.on('after:render', (opt) => { if (!opt?.ctx || opt.ctx === canvas.contextContainer) drawRulers(); });
 window.addEventListener('resize', drawRulers);
+
+// ---------------------------------------------------------------- print guides & framing
+// Saved with the project, since they describe how this print will be made and framed:
+//  • safe area — dashed line; keep faces and text inside it (trimming and mats hide a few mm)
+//  • bleed     — extra background around the edges in the export, trimmed off after printing
+//  • mat/frame — on-screen preview of the framed result (never exported); also gives the mat opening size
+const DEFAULT_GUIDES = { safe: false, safeMm: 5, bleedMm: 0, mat: false, matMm: 50, overlapMm: 5, matColor: '#f4f0e6', frameColor: '#2b2622', frameMm: 20 };
+print.guides = { ...DEFAULT_GUIDES };
+const BLEED_OPTIONS = {
+  cm: [[0, 'None'], [2, '2 mm'], [3, '3 mm (most common)'], [5, '5 mm']],
+  in: [[0, 'None'], [1.5875, '1/16 in'], [3.175, '1/8 in (most common)'], [6.35, '1/4 in']],
+};
+const pxPerMm = () => (print.mode === 'pixels' ? 300 / 25.4 : print.dpi / 25.4); // pixel-size prints: assume 300 DPI
+const bleedPx = () => (print.mode === 'pixels' ? 0 : Math.round(print.guides.bleedMm * pxPerMm()));
+/** How far guides and the frame preview reach beyond the page (print px), so "Fit" shows all of it. */
+function pageExtras() {
+  const g = print.guides;
+  return Math.max(bleedPx(), g.mat ? (g.matMm + g.frameMm - g.overlapMm) * pxPerMm() : 0);
+}
+/** A length in mm, shown in the print's units. */
+function fmtLen(mm) {
+  if (print.mode !== 'pixels' && print.unit === 'in') return `${+(mm / 25.4).toFixed(2)} in`;
+  return mm < 10 ? `${+mm.toFixed(1)} mm` : `${+(mm / 10).toFixed(1)} cm`;
+}
+/** A width × height in mm, shown in the print's units. */
+function fmtSize(wMm, hMm) {
+  if (print.mode !== 'pixels' && print.unit === 'in') return `${+(wMm / 25.4).toFixed(2)} × ${+(hMm / 25.4).toFixed(2)} in`;
+  return `${+(wMm / 10).toFixed(1)} × ${+(hMm / 10).toFixed(1)} cm`;
+}
+const trimMm = () => ({ w: (print.W / pxPerMm()), h: (print.H / pxPerMm()) });
+
+function refreshBleedOptions() {
+  const sel = $('#guideBleed'), opts = BLEED_OPTIONS[print.mode === 'pixels' ? 'cm' : print.unit] || BLEED_OPTIONS.cm;
+  sel.innerHTML = '';
+  for (const [mm, label] of opts) sel.add(new Option(label, String(mm)));
+  const cur = print.guides.bleedMm;
+  if (!opts.some(([mm]) => Math.abs(mm - cur) < 0.01)) sel.add(new Option(`${fmtLen(cur)} (custom)`, String(cur)));
+  sel.value = String(opts.find(([mm]) => Math.abs(mm - cur) < 0.01)?.[0] ?? cur);
+  sel.disabled = print.mode === 'pixels';
+}
+function syncGuidesUi() {
+  const g = print.guides;
+  $('#guideSafe').checked = g.safe; $('#viewSafe').checked = g.safe;
+  $('#guideSafeMm').value = g.safeMm; $('#guideSafeVal').textContent = fmtLen(g.safeMm);
+  $('#guideSafeRow').classList.toggle('hidden', !g.safe);
+  $('#matOn').checked = g.mat; $('#viewMat').checked = g.mat;
+  $('#matOpts').classList.toggle('hidden', !g.mat);
+  $('#matMm').value = g.matMm; $('#matMmVal').textContent = g.matMm ? fmtLen(g.matMm) : 'none';
+  $('#matOverlapMm').value = g.overlapMm; $('#matOverlapVal').textContent = fmtLen(g.overlapMm);
+  $('#matColor').value = g.matColor; $('#frameColor').value = g.frameColor;
+  $('#frameMm').value = g.frameMm; $('#frameMmVal').textContent = g.frameMm ? fmtLen(g.frameMm) : 'none';
+  $('#guideBleedHint').classList.toggle('hidden', print.mode === 'pixels' && !g.bleedMm);
+  refreshBleedOptions();
+  if (print.mode === 'pixels') { $('#matInfo').textContent = ''; return; }
+  const t = trimMm(), win = { w: t.w - 2 * g.overlapMm, h: t.h - 2 * g.overlapMm };
+  const outer = { w: win.w + 2 * g.matMm, h: win.h + 2 * g.matMm };
+  $('#matInfo').innerHTML = g.matMm
+    ? `Mat opening: <b>${fmtSize(win.w, win.h)}</b> · mat outer / frame inner size: <b>${fmtSize(outer.w, outer.h)}</b>`
+    : `Frame inner size: <b>${fmtSize(t.w, t.h)}</b>`;
+}
+function setGuide(key, value, kind) {
+  const before = print.guides;
+  print.guides = { ...print.guides, [key]: value };
+  syncGuidesUi();
+  // the frame preview and bleed change how much room the page needs on screen
+  if ((key === 'mat' || key === 'bleedMm' || before.mat) && zoomMode === 'fit') updateZoom();
+  canvas.requestRenderAll();
+  markDirty(kind);
+}
+const bindGuide = (sel, key, read, continuous) => {
+  const el = $(sel);
+  el.addEventListener(continuous ? 'input' : 'change', () => setGuide(key, read(el), continuous ? 'continuous' : undefined));
+  if (continuous) el.addEventListener('change', () => markDirty());
+};
+bindGuide('#guideSafe', 'safe', (el) => el.checked);
+bindGuide('#viewSafe', 'safe', (el) => el.checked);
+bindGuide('#guideSafeMm', 'safeMm', (el) => +el.value, true);
+bindGuide('#guideBleed', 'bleedMm', (el) => +el.value);
+bindGuide('#matOn', 'mat', (el) => el.checked);
+bindGuide('#viewMat', 'mat', (el) => el.checked);
+bindGuide('#matMm', 'matMm', (el) => +el.value, true);
+bindGuide('#matOverlapMm', 'overlapMm', (el) => +el.value, true);
+bindGuide('#matColor', 'matColor', (el) => el.value, true);
+bindGuide('#frameColor', 'frameColor', (el) => el.value, true);
+bindGuide('#frameMm', 'frameMm', (el) => +el.value, true);
+$$('.mat-preset').forEach((b) => b.addEventListener('click', () => {
+  print.guides = { ...print.guides, matColor: b.dataset.mat || print.guides.matColor, matMm: b.dataset.mat ? (print.guides.matMm || 50) : 0 };
+  setGuide('mat', true);
+}));
+
+/** Mat with its window, a bevelled cut edge, and the frame around it — drawn over the print. */
+function drawFramePreview(ctx, k, z) {
+  const g = print.guides, W = print.W, H = print.H;
+  const ov = g.overlapMm * k, m = g.matMm * k, f = g.frameMm * k;
+  const win = [ov, ov, W - 2 * ov, H - 2 * ov];
+  const mo = [ov - m, ov - m, W - 2 * ov + 2 * m, H - 2 * ov + 2 * m];
+  const fo = [mo[0] - f, mo[1] - f, mo[2] + 2 * f, mo[3] + 2 * f];
+  const ring = (outer, inner) => { ctx.beginPath(); ctx.rect(...outer); ctx.rect(...inner); };
+  // frame, casting a soft shadow on the wall
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 24; ctx.shadowOffsetY = 6;
+  ctx.fillStyle = g.frameColor;
+  ring(fo, mo); ctx.fill('evenodd');
+  ctx.restore();
+  if (f) { // a lighter inner lip on the frame for depth
+    ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = Math.max(1 / z, f * 0.08);
+    ctx.strokeRect(mo[0] - ctx.lineWidth / 2, mo[1] - ctx.lineWidth / 2, mo[2] + ctx.lineWidth, mo[3] + ctx.lineWidth);
+  }
+  if (m) {
+    ctx.fillStyle = g.matColor;
+    ring(mo, win); ctx.fill('evenodd');
+    // bevelled window edge: the white core of the mat board
+    const bev = Math.max(1 / z, 1.5 * k);
+    ctx.strokeStyle = 'rgba(255,255,255,.9)'; ctx.lineWidth = bev;
+    ctx.strokeRect(win[0] - bev / 2, win[1] - bev / 2, win[2] + bev, win[3] + bev);
+  }
+  // the mat/frame edge throws a slight shadow onto the print (light from the top left)
+  const s = 4 * k;
+  let gr = ctx.createLinearGradient(0, win[1], 0, win[1] + s);
+  gr.addColorStop(0, 'rgba(0,0,0,.22)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = gr; ctx.fillRect(win[0], win[1], win[2], s);
+  gr = ctx.createLinearGradient(win[0], 0, win[0] + s, 0);
+  gr.addColorStop(0, 'rgba(0,0,0,.18)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = gr; ctx.fillRect(win[0], win[1], s, win[3]);
+}
+
+canvas.on('after:render', (opt) => {
+  const ctx = canvas.contextContainer;
+  if ((opt && opt.ctx && opt.ctx !== ctx) || !print.W) return; // never part of an export
+  const g = print.guides, v = canvas.viewportTransform, z = v[0], k = pxPerMm();
+  ctx.save();
+  ctx.transform(v[0], v[1], v[2], v[3], v[4], v[5]);
+  if (g.mat) drawFramePreview(ctx, k, z);
+  ctx.lineWidth = 1.25 / z;
+  if (bleedPx() > 0 && !g.mat) { // trim line: where the print will be cut
+    ctx.setLineDash([8 / z, 5 / z]); ctx.strokeStyle = 'rgba(220,40,60,.9)';
+    ctx.strokeRect(0, 0, print.W, print.H);
+  }
+  if (g.safe) {
+    const sm = g.safeMm * k;
+    ctx.setLineDash([3 / z, 4 / z]); ctx.strokeStyle = 'rgba(0,150,210,.95)';
+    ctx.strokeRect(sm, sm, print.W - 2 * sm, print.H - 2 * sm);
+  }
+  ctx.restore();
+});
 
 // ---------------------------------------------------------------- random layout settings
 /** Show only the controls that matter for the chosen style. */
@@ -3028,18 +3184,23 @@ async function addSearchPicks() {
 }
 
 // ---------------------------------------------------------------- export
-$('#btnExport').addEventListener('click', () => {
-  const { W, H } = print;
+function syncExportInfo() {
+  const b = bleedPx(), W = print.W + 2 * b, H = print.H + 2 * b;
   let info = `${W.toLocaleString()} × ${H.toLocaleString()} px`;
   if (print.mode === 'physical') info += ` — ${print.w} × ${print.h} ${print.unit} at ${print.dpi} DPI`;
+  if (b) info += `, plus ${fmtLen(print.guides.bleedMm)} bleed on each side (file ${fmtSize(W / pxPerMm(), H / pxPerMm())}; trim to ${fmtSize(print.W / pxPerMm(), print.H / pxPerMm())})`;
   $('#exportInfo').textContent = info;
-  const low = print.mode === 'physical'
-    ? canvas.getObjects().filter(isSticker).filter((o) => print.dpi / o.scaleX < 150).length : 0;
-  $('#exportWarn').textContent = low
-    ? `${low} sticker${low === 1 ? ' is' : 's are'} enlarged beyond ~150 DPI and may look soft in print.`
-    : 'The DPI is written into the file so print shops read the right physical size.';
-  $('#exportDialog').showModal();
-});
+  const fmt = $('#exportFormat').value;
+  const low = allLeafObjects().filter(isSticker).filter((o) => stickerQuality(o)?.level === 'bad').length;
+  const notes = [];
+  if (low) notes.push(`${low} sticker${low === 1 ? ' is' : 's are'} enlarged below 150 DPI and may look soft in print.`);
+  if (fmt === 'pdf') notes.push('PDF: one page at the exact physical size' + (b ? ', with the trim size marked for the print shop' : '') + '. Colours are RGB; print shops convert them.');
+  else if (print.mode === 'physical') notes.push('The DPI is written into the file so print shops read the right physical size.');
+  if (print.guides.mat) notes.push('The mat and frame preview is not included.');
+  $('#exportWarn').textContent = notes.join(' ');
+}
+$('#exportFormat').addEventListener('change', syncExportInfo);
+$('#btnExport').addEventListener('click', () => { syncExportInfo(); $('#exportDialog').showModal(); });
 
 $('#exportGo').addEventListener('click', async () => {
   const fmt = $('#exportFormat').value;
@@ -3053,16 +3214,34 @@ $('#exportGo').addEventListener('click', async () => {
     canvas.discardActiveObject(); canvas.requestRenderAll();
     // Rendered at true 1:1 scale; the display canvas is rounded to whole pixels, so crop to the exact print size.
     const v = canvas.viewportTransform;
-    const full = canvas.toCanvasElement(1 / zoom, { left: v[4], top: v[5], width: (print.W + 1) * zoom, height: (print.H + 1) * zoom }); // +1 px guards against float rounding; cropped below
-    const out = makeCanvas(print.W, print.H);
+    const b = bleedPx(); // with bleed, the file is larger than the print on every side
+    const full = canvas.toCanvasElement(1 / zoom, {
+      left: v[4] - b * zoom, top: v[5] - b * zoom, width: (print.W + 2 * b + 1) * zoom, height: (print.H + 2 * b + 1) * zoom,
+    }); // +1 px guards against float rounding; cropped below
+    const out = makeCanvas(print.W + 2 * b, print.H + 2 * b);
     const octx = out.getContext('2d');
+    octx.translate(b, b);
     paintPage(octx);
+    octx.setTransform(1, 0, 0, 1, 0, 0);
     octx.drawImage(full, 0, 0);
-    let blob = await canvasToBlob(out, fmt === 'png' ? 'image/png' : 'image/jpeg', 0.95);
-    if (print.mode === 'physical') blob = await insertDpiMetadata(blob, print.dpi, fmt);
+    let blob;
+    if (fmt === 'pdf') {
+      const dpi = print.mode === 'physical' ? print.dpi : 300; // pixel-size prints are laid out at 300 DPI
+      const jpeg = await canvasToBlob(out, 'image/jpeg', 0.95);
+      blob = await jpegToPdf(jpeg, {
+        widthPx: out.width, heightPx: out.height,
+        widthPt: (out.width / dpi) * 72, heightPt: (out.height / dpi) * 72, bleedPt: (b / dpi) * 72,
+        title: projectName,
+      });
+    } else {
+      blob = await canvasToBlob(out, fmt === 'png' ? 'image/png' : 'image/jpeg', 0.95);
+      if (print.mode === 'physical') blob = await insertDpiMetadata(blob, print.dpi, fmt);
+    }
+    const ext = { png: 'png', jpeg: 'jpg', pdf: 'pdf' }[fmt];
+    const bleedTag = b ? `-bleed${+print.guides.bleedMm.toFixed(1)}mm` : '';
     const name = print.mode === 'physical'
-      ? `${projectSlug()}-${print.w}x${print.h}${print.unit}-${print.dpi}dpi.${fmt === 'png' ? 'png' : 'jpg'}`
-      : `${projectSlug()}-${print.W}x${print.H}.${fmt === 'png' ? 'png' : 'jpg'}`;
+      ? `${projectSlug()}-${print.w}x${print.h}${print.unit}-${print.dpi}dpi${bleedTag}.${ext}`
+      : `${projectSlug()}-${print.W}x${print.H}.${ext}`;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
@@ -3189,7 +3368,7 @@ async function serializeProject() {
 
 function serializePrint() {
   return { mode: print.mode, w: print.w, h: print.h, unit: print.unit, dpi: print.dpi, pxW: print.pxW, pxH: print.pxH,
-    bg: print.bg, preset: $('#sizePreset').value, background: { ...print.background } };
+    bg: print.bg, preset: $('#sizePreset').value, background: { ...print.background }, guides: { ...print.guides } };
 }
 
 /** One sticker or text as plain JSON (positions are relative to its group, if it's in one). */
@@ -3267,6 +3446,7 @@ function addSerializedObjects(objects) {
 function applyPrintState(p) {
   Object.assign(print, p, { W: 0, H: 0 }); // W/H = 0 → no remapping of objects
   print.background = { ...DEFAULT_BACKGROUND, ...(p.background || {}) };
+  print.guides = { ...DEFAULT_GUIDES, ...(p.guides || {}) };
   syncBackgroundUi();
   $('#sizePreset').value = p.preset || (print.mode === 'pixels' ? 'pixels' : 'custom');
   writePrintFields();
@@ -3473,7 +3653,9 @@ $('#btnNewProject').addEventListener('click', async () => {
   resetWorkspace();
   $('#bgColor').value = '#ffffff';
   print.background = { ...DEFAULT_BACKGROUND };
+  print.guides = { ...DEFAULT_GUIDES };
   syncBackgroundUi();
+  syncGuidesUi();
   setBackground('#ffffff');
   renderLibrary();
   updateCanvasStatus();
@@ -3515,6 +3697,7 @@ applyTheme();
 // ---------------------------------------------------------------- boot
 initPrintUi();
 syncBackgroundUi();
+syncGuidesUi();
 syncSliderLabels();
 applyViewPrefs();
 setBackground('#ffffff');

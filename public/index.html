@@ -91,6 +91,8 @@
             <label class="check"><input id="rulersToggle" type="checkbox" /> Show rulers</label>
             <label class="check"><input id="gridToggle" type="checkbox" /> Show grid</label>
             <label>Grid spacing <select id="gridStep"></select></label>
+            <label class="check"><input id="viewSafe" type="checkbox" /> Show safe area</label>
+            <label class="check"><input id="viewMat" type="checkbox" /> Preview with mat &amp; frame</label>
             <p class="hint">With “Snap &amp; guides” on, items also snap to the grid lines. The grid is never printed.</p>
           </div>
         </details>
@@ -208,6 +210,35 @@
             <label>Opacity <input id="bgImageOpacity" type="range" min="5" max="100" value="100" /></label>
           </div>
         </div>
+      </section>
+
+      <section data-collapse="framing" id="framingPanel">
+        <h2 class="collapsible">Print guides &amp; framing</h2>
+        <label class="check"><input id="guideSafe" type="checkbox" /> Show safe area</label>
+        <label id="guideSafeRow" class="hidden">Safe margin <span class="val" id="guideSafeVal"></span>
+          <input id="guideSafeMm" type="range" min="2" max="25" value="5" />
+        </label>
+        <p class="hint">Keep faces and text inside the dashed blue line — trimming and a mat can hide a few millimetres of each edge.</p>
+        <label>Bleed (for print shops) <select id="guideBleed"></select></label>
+        <p class="hint" id="guideBleedHint">Extra background added around the edges of the export and cut off after printing, so no white slivers show at the edges. Ask your print shop; 3 mm is typical.</p>
+        <label class="check"><input id="matOn" type="checkbox" /> Preview with mat &amp; frame</label>
+        <div id="matOpts" class="hidden">
+          <div class="row gap-sm wrap mat-presets">
+            <button class="mat-preset" data-mat="#ffffff">White mat</button>
+            <button class="mat-preset" data-mat="#f4f0e6">Cream</button>
+            <button class="mat-preset" data-mat="#1d1d1f">Black</button>
+            <button class="mat-preset" data-mat="">No mat</button>
+          </div>
+          <div class="grid2">
+            <label>Mat width <span class="val" id="matMmVal"></span><input id="matMm" type="range" min="0" max="120" value="50" /></label>
+            <label title="How much of the print's edge the mat covers">Mat overlap <span class="val" id="matOverlapVal"></span><input id="matOverlapMm" type="range" min="0" max="15" step="0.5" value="5" /></label>
+            <label>Mat colour <input id="matColor" type="color" value="#f4f0e6" /></label>
+            <label>Frame colour <input id="frameColor" type="color" value="#2b2622" /></label>
+            <label>Frame width <span class="val" id="frameMmVal"></span><input id="frameMm" type="range" min="0" max="60" value="20" /></label>
+          </div>
+          <p class="hint" id="matInfo"></p>
+        </div>
+        <p class="hint">The mat and frame are only a preview; they're never in the exported file.</p>
       </section>
 
       <section data-collapse="layout">
@@ -530,6 +561,7 @@
       <select id="exportFormat">
         <option value="png">PNG (lossless)</option>
         <option value="jpeg">JPEG (smaller file)</option>
+        <option value="pdf">PDF (exact print size, for print shops)</option>
       </select>
     </label>
     <p class="hint" id="exportWarn"></p>

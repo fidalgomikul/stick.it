@@ -73,8 +73,12 @@ Note: Google has closed the Custom Search JSON API to new customers, so this onl
   - Regenerating the random layout keeps groups.
   - Editing a sticker updates its copies inside groups too.
 - **Background:** a solid colour, a two-colour gradient (vertical, horizontal, diagonal or radial), a paper texture (paper grain, linen, canvas or watercolour, generated in the app so no image files are needed), or your own image (fill, fit or tile, with opacity). The background is included in the export and saved with the project.
+- **Print guides & framing:**
+  - A **safe area** line shows where faces and text should stay, and items snap to it.
+  - **Bleed** (2–5 mm, or 1/16–1/4 in) extends the background past the edge for print shops. A red dashed line marks where the print will be cut.
+  - **Mat & frame preview** has white, cream or black mat presets and adjustable mat width, overlap and frame. It tells you the mat opening and frame size to order, and it's never included in the export.
 - **Print size:** choose a preset (A5–A2, common cm and inch frame sizes), a custom physical size with DPI (150/200/300), or a plain pixel size. Changing the size scales the existing layout to fit.
-- **Export:** PNG or JPEG at full print resolution, with the DPI written into the file. It warns you about stickers enlarged below about 150 DPI.
+- **Export:** PNG or JPEG at full print resolution with the DPI written into the file, or **PDF** at the exact physical size. With bleed, the PDF marks the trim size (TrimBox) for print shops. The export warns about stickers enlarged below about 150 DPI.
 
 - **Snap & align:** while dragging, items snap to the page edges and centre and to other items' edges and centres, with magenta guide lines. Rotation snaps to 0°, 45°, 90° and so on when you are within 4°. Hold Alt to drag freely, or turn snapping off with *Snap & guides* in the toolbar. In the Selection panel, one item aligns to the page and several items align to each other. *Space ↔ / ↕* spreads 3 or more items evenly.
 - **Undo / redo:** use the header buttons, Ctrl+Z, or Ctrl+Y / Ctrl+Shift+Z. They cover the print (stickers, text, layout), sticker edits, library changes and print settings. Each action is one step: a move, a delete, a button click, a whole random layout, a whole upload, or *Clear print*. Continuous input counts as one step when it ends: typing (when you leave the text box), dragging a colour picker (when you release it) or holding an arrow key (when you let go). History lasts for the browser session and is limited to 100 steps.
@@ -93,6 +97,7 @@ Note: Google has closed the Custom Search JSON API to new customers, so this onl
 ## Files
 - `server.js`: static server, search endpoint, and an image proxy so exports aren't blocked by CORS.
 - `public/app.js`: UI, canvas (Fabric.js 5), library, editor and export.
+- `public/pdf.js`: a minimal PDF writer (one page with the print as a high-quality JPEG).
 - `public/backgrounds.js`: page backgrounds and generated paper textures.
 - `public/layouts.js`: the layout styles (placement maths only).
 - `public/imaging.js`: colour keying, trimming, outlines and DPI metadata.
