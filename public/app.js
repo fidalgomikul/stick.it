@@ -1916,10 +1916,10 @@ function applyLayoutSettings(l) {
 /** @type {Array<{id,name,steps:{url,w,h}[],outline:{on,w,c},finalUrl,finalImg,use,count}>} */
 const library = [];
 
-async function addToLibrary({ url, w, h }, name, tags = []) {
+async function addToLibrary({ url, w, h }, name, tags = [], source = null) {
   const item = {
     id: newId(), name: name || 'Image', steps: [{ url, w, h, ox: 0, oy: 0 }], outline: { on: false, w: 4, c: '#ffffff' }, ...lookCopies({}),
-    finalUrl: url, finalImg: await loadImage(url), use: true, count: 1, size: 1, tags: [],
+    finalUrl: url, finalImg: await loadImage(url), use: true, count: 1, size: 1, tags: [], source: source ? { ...source } : null,
   };
   if (tags.length) addTags(item, tags.join(','));
   library.push(item);
@@ -2021,6 +2021,7 @@ function renderLibraryView() {
       <img class="lib-thumb checker" src="${item.finalUrl}" alt="" title="Click to edit" />
       <div class="lib-controls">
         <input class="lib-name" type="text" maxlength="60" aria-label="Sticker name" />
+        ${item.source ? '<button class="lic-chip" title="Where this image is from and what its licence allows"></button>' : ''}
         <div class="lib-count-row">
           <label class="lib-count">Copies <input type="number" min="0" max="50" value="${item.count}" /></label>
           <label class="lib-count" title="Relative size in random layouts">Size <select class="lib-size">${SIZE_WEIGHTS.map((w) => `<option value="${w}" ${w === (item.size || 1) ? 'selected' : ''}>${weightLabel(w)}</option>`).join('')}</select></label>
@@ -2045,6 +2046,14 @@ function renderLibraryView() {
     });
     li.querySelector('.lib-size').addEventListener('change', (e) => { item.size = Number(e.target.value); renderLibrary(); });
     renderItemTags(li.querySelector('.lib-tags'), item);
+    const chip = li.querySelector('.lic-chip');
+    if (chip) {
+      const f = licenceFlags(item.source);
+      chip.textContent = (f.nd ? '⚠ ' : f.unknown ? '? ' : '© ') + licenceShort(item.source);
+      chip.classList.toggle('bad', f.nd);
+      chip.classList.toggle('warn', !f.nd && (f.unknown || f.nc));
+      chip.addEventListener('click', () => showLicence(item));
+    }
     li.querySelector('.lib-thumb').addEventListener('click', () => openEditor(item));
     li.querySelector('[data-act=edit]').addEventListener('click', () => openEditor(item));
     li.querySelector('[data-act=place]').addEventListener('click', () => placeSingle(item));
@@ -2131,6 +2140,7 @@ function duplicateSticker(item) {
   const copy = {
     ...item, id: newId(), name: item.name + ' (copy)',
     steps: item.steps.map((st) => ({ ...st })), outline: { ...item.outline }, ...lookCopies(item), tags: [...(item.tags || [])],
+    source: item.source ? { ...item.source } : null,
   };
   library.splice(library.indexOf(item) + 1, 0, copy);
   flashId = copy.id;
@@ -2178,13 +2188,13 @@ $('#btnSelectAll').addEventListener('click', () => { shownLibrary().forEach((i) 
 $('#btnSelectNone').addEventListener('click', () => { shownLibrary().forEach((i) => (i.use = false)); renderLibrary(); });
 $('#btnGenerate').addEventListener('click', generateCollage);
 
-async function addFiles(files) {
+async function addFiles(files, source = null) {
   const images = [...files].filter((f) => f.type.startsWith('image/'));
   if (!images.length) return;
   holdHistory(); // one upload = one undo step, however many files
-  try { await addFilesNow(images); } finally { releaseHistory(); }
+  try { await addFilesNow(images, source); } finally { releaseHistory(); }
 }
-async function addFilesNow(images) {
+async function addFilesNow(images, source) {
   let added = 0;
   for (const f of images) {
     status(`Adding ${f.name}…`, true);
@@ -2192,7 +2202,7 @@ async function addFilesNow(images) {
       const src = URL.createObjectURL(f);
       const norm = await normalizeSource(src, f);
       if (norm.url !== src) URL.revokeObjectURL(src);
-      await addToLibrary(norm, f.name.replace(/\.[^.]+$/, ''));
+      await addToLibrary(norm, f.name.replace(/\.[^.]+$/, ''), [], source);
       added++;
     } catch (e) { console.error(e); status(`Could not read ${f.name}.`); }
   }
@@ -2211,7 +2221,7 @@ async function addImageFromUrl(url) {
     const blob = await r.blob();
     let name = 'Pasted image';
     try { name = decodeURIComponent(new URL(url).pathname.split('/').pop()).replace(/\.[^.]+$/, '') || name; } catch { /* keep default */ }
-    await addFiles([new File([blob], name + '.img', { type: blob.type })]);
+    await addFiles([new File([blob], name + '.img', { type: blob.type })], { provider: 'link', title: name, pageUrl: url, source: new URL(url).hostname, license: 'Unknown — check the source' });
   } catch (err) {
     status('Could not add that link as an image: ' + err.message);
   }
@@ -3090,9 +3100,24 @@ $$('[data-close]').forEach((b) => b.addEventListener('click', () => {
 const search = { q: '', provider: 'openverse', page: 1, results: [], selected: new Map() };
 
 fetch('/api/config').then((r) => r.json()).then((cfg) => {
-  const opt = $('#searchProvider option[value=google]');
-  if (!cfg.google) { opt.disabled = true; opt.textContent = 'Google Images (not configured — see README)'; }
+  for (const opt of $$('#searchProvider option')) {
+    if (cfg[opt.value] === false) { opt.disabled = true; opt.textContent += ' — needs a key (see README)'; }
+  }
+  try { // remember the last source used
+    const last = localStorage.getItem('collage.searchProvider');
+    if (last && cfg[last]) $('#searchProvider').value = last;
+  } catch { /* ignore */ }
+  syncSearchFilters();
 }).catch(() => {});
+/** Unsplash and Pexels images may all be edited and used commercially, so the filters don't apply there. */
+function syncSearchFilters() {
+  const p = $('#searchProvider').value;
+  $('#searchFilters').classList.toggle('hidden', p === 'unsplash' || p === 'pexels' || p === 'google');
+}
+$('#searchProvider').addEventListener('change', () => {
+  syncSearchFilters();
+  try { localStorage.setItem('collage.searchProvider', $('#searchProvider').value); } catch { /* ignore */ }
+});
 
 $('#btnOpenSearch').addEventListener('click', () => { $('#searchDialog').showModal(); $('#searchQuery').focus(); });
 $('#searchForm').addEventListener('submit', (e) => {
@@ -3110,13 +3135,14 @@ async function runSearch() {
   $('#searchNote').textContent = 'Searching…';
   $('#searchMore').disabled = true;
   try {
-    const r = await fetch(`/api/search?provider=${encodeURIComponent(search.provider)}&page=${search.page}&q=${encodeURIComponent(search.q)}`);
+    const filters = `&editable=${$('#searchEditable').checked ? 1 : 0}&commercial=${$('#searchCommercial').checked ? 1 : 0}`;
+    const r = await fetch(`/api/search?provider=${encodeURIComponent(search.provider)}&page=${search.page}&q=${encodeURIComponent(search.q)}${filters}`);
     const data = await r.json();
     if (!r.ok) throw new Error(data.error || r.statusText);
     search.results.push(...data.results);
     data.results.forEach(renderSearchCard);
     $('#searchNote').textContent = search.results.length
-      ? 'Click images to select them, then add them to your stickers. Check each image\'s license before printing.'
+      ? 'Click images to select them, then add them to your stickers. Each sticker keeps its licence and credit (see Credits).'
       : 'No results.';
     $('#searchMore').disabled = data.results.length === 0;
   } catch (e) {
@@ -3130,6 +3156,14 @@ function renderSearchCard(res) {
   card.className = 'search-card';
   card.title = `${res.title}${res.creator ? ' — ' + res.creator : ''}\n${res.license} · ${res.source || ''}`;
   card.innerHTML = '<img loading="lazy" alt="" /><div class="meta"></div>';
+  const flags = licenceFlags({ ...res });
+  if (flags && (flags.nd || flags.nc || flags.unknown)) {
+    const b = document.createElement('span');
+    b.className = 'lic-badge ' + (flags.nd ? 'bad' : 'warn');
+    b.textContent = flags.nd ? 'No edits' : flags.unknown ? 'Licence?' : 'Non-commercial';
+    b.title = licenceNotes({ ...res }).map((n) => n[1]).join(' ');
+    card.appendChild(b);
+  }
   // If the thumbnail service fails, try the full image; hide the result only if both fail.
   card.querySelector('img').onerror = (e) => {
     if (!e.target.dataset.triedFull && res.full && res.full !== res.thumb) {
@@ -3168,13 +3202,19 @@ async function addSearchPicks() {
   for (const [i, res] of picks.entries()) {
     $('#searchNote').textContent = `Downloading ${i + 1} of ${picks.length}…`;
     let blob;
-    try { blob = await fetchProxied(res.full); }
-    catch { try { blob = await fetchProxied(res.thumb); lowRes++; } catch { continue; } }
+    // the full image; if the host refuses it, a smaller rendition; as a last resort the preview
+    for (const [u, small] of [[res.full, false], [res.fullFallback, false], [res.thumb, true]]) {
+      if (!u) continue;
+      try { blob = await fetchProxied(u); if (small) lowRes++; break; } catch { /* try the next one */ }
+    }
+    if (!blob) continue;
     try {
       const src = URL.createObjectURL(blob);
       const norm = await normalizeSource(src, blob);
       if (norm.url !== src) URL.revokeObjectURL(src);
-      await addToLibrary(norm, res.title, [search.q]);
+      const { id, thumb, full, fullFallback, width, height, downloadLocation, nonFree, ...source } = res;
+      await addToLibrary(norm, res.title, [search.q], source);
+      if (downloadLocation) fetch('/api/unsplash-download?loc=' + encodeURIComponent(downloadLocation)).catch(() => {}); // Unsplash's terms
       ok++;
     } catch (e) { console.error(e); }
   }
@@ -3201,6 +3241,11 @@ function syncExportInfo() {
   else if (print.mode === 'physical') notes.push('The DPI is written into the file so print shops read the right physical size.');
   if (print.guides.mat) notes.push('The mat and frame preview is not included.');
   $('#exportWarn').textContent = notes.join(' ');
+  const credits = creditsText('print');
+  $('#exportCreditsRow').classList.toggle('hidden', !credits.count);
+  $('#exportCreditsCount').textContent = credits.count ? `(${credits.count} source${credits.count === 1 ? '' : 's'})` : '';
+  const needCredit = library.some((i) => i.source && onPrintCounts()[i.id] && licenceFlags(i.source)?.credit);
+  $('#exportCredits').checked = needCredit;
 }
 $('#exportFormat').addEventListener('change', syncExportInfo);
 $('#btnExport').addEventListener('click', () => { syncExportInfo(); $('#exportDialog').showModal(); });
@@ -3248,6 +3293,9 @@ $('#exportGo').addEventListener('click', async () => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob); a.download = name; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    if ($('#exportCredits').checked && !$('#exportCreditsRow').classList.contains('hidden')) {
+      downloadBlob(new Blob([creditsText('print').text], { type: 'text/plain;charset=utf-8' }), `${slugify(projectName)}-credits.txt`);
+    }
     $('#exportDialog').close();
     status(`Exported ${name} (${(blob.size / 1e6).toFixed(1)} MB).`);
   } catch (e) {
@@ -3353,7 +3401,7 @@ async function serializeLibraryItems(items, keyFor) {
     for (const st of item.steps) steps.push({ key: await keyFor(st.url), w: st.w, h: st.h, ox: st.ox, oy: st.oy });
     // the finished look (outline, shape…) is slow to re-render, so it's stored too
     const finalKey = lookNeedsRender(lookOf(item)) ? await keyFor(item.finalUrl) : null;
-    out.push({ id: item.id, name: item.name, use: item.use, count: item.count, outline: { ...item.outline }, ...lookCopies(item), steps, finalKey, tags: [...(item.tags || [])], size: item.size || 1 });
+    out.push({ id: item.id, name: item.name, use: item.use, count: item.count, outline: { ...item.outline }, ...lookCopies(item), steps, finalKey, tags: [...(item.tags || [])], size: item.size || 1, source: item.source || null });
   }
   return out;
 }
@@ -3377,7 +3425,7 @@ async function buildLibraryItem(s, urlOf) {
     finalUrl = await canvasToUrl(renderSticker(await loadImage(steps[steps.length - 1].url), { ...lookCopies(s), outline: s.outline }, 0, { trim: true }));
   }
   const finalImg = await loadImage(finalUrl);
-  return { id: s.id, name: s.name, use: s.use, count: s.count, outline: { ...s.outline }, ...lookCopies(s), steps, finalUrl, finalImg, tags: [...(s.tags || [])], size: s.size || 1 };
+  return { id: s.id, name: s.name, use: s.use, count: s.count, outline: { ...s.outline }, ...lookCopies(s), steps, finalUrl, finalImg, tags: [...(s.tags || [])], size: s.size || 1, source: s.source || null };
 }
 
 /** Snapshot everything into { meta (JSON), blobs (Map key → Blob) }. */
@@ -3562,7 +3610,7 @@ function snapshotState() {
   return JSON.stringify({
     print: serializePrint(),
     library: library.map((i) => ({ id: i.id, name: i.name, use: i.use, count: i.count, outline: { ...i.outline }, ...lookCopies(i),
-      steps: i.steps.map((s) => ({ ...s })), finalUrl: i.finalUrl, tags: [...(i.tags || [])], size: i.size || 1 })),
+      steps: i.steps.map((s) => ({ ...s })), finalUrl: i.finalUrl, tags: [...(i.tags || [])], size: i.size || 1, source: i.source || null })),
     objects: serializeObjects(),
   });
 }
@@ -3962,6 +4010,117 @@ $('#collSave').addEventListener('click', async () => {
   } finally { renderCollections(); }
 });
 $('#collName').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#collSave').click(); });
+
+// ---------------------------------------------------------------- licences & credits
+// Stickers from image search (or a pasted link) remember where they came from: title, creator, licence
+// and source page. That drives the licence chip in the library, warnings, and the credits list.
+
+/** What a sticker's licence means in practice. */
+function licenceFlags(src) {
+  if (!src) return null; // the user's own image
+  const l = src.license || '';
+  return {
+    unknown: src.provider === 'link' || src.provider === 'google' || /unknown|see source/i.test(l),
+    nd: /\bND\b/i.test(l),                 // no derivatives: edits/cut-outs may not be allowed
+    nc: /\bNC\b/i.test(l),                 // non-commercial
+    sa: /\bSA\b/i.test(l),                 // share-alike
+    credit: /\bBY\b|GFDL/i.test(l),        // attribution required
+    free: /CC0|public domain|Unsplash|Pexels/i.test(l),
+  };
+}
+function licenceShort(src) {
+  const f = licenceFlags(src);
+  if (!f) return '';
+  return f.unknown ? 'Licence unknown' : src.license;
+}
+/** One line of credit text for a source. */
+function creditLine(src) {
+  if (src.provider === 'link') return `Image from ${src.pageUrl} (licence unknown)`;
+  if (src.provider === 'unsplash' || src.provider === 'pexels') return `${src.attribution}: ${src.pageUrl}`;
+  const by = src.creator ? ` by ${src.creator}` : '';
+  const lic = src.license ? `, ${src.license}${src.licenseUrl ? ` (${src.licenseUrl})` : ''}` : '';
+  return `“${src.title || 'Untitled'}”${by}${lic}. Source: ${src.pageUrl || src.source || 'unknown'}`;
+}
+function licenceNotes(src) {
+  const f = licenceFlags(src);
+  if (!f) return [];
+  const notes = [];
+  if (f.unknown) notes.push(['warn', 'The licence is unknown. Check the source page before printing, sharing or selling this.']);
+  if (f.nd) notes.push(['bad', 'No derivatives (ND): the licence doesn’t allow changed versions, so cropping, cutting out or recolouring it may not be permitted.']);
+  if (f.nc) notes.push(['warn', 'Non-commercial (NC): fine for a print for yourself, not for one you sell.']);
+  if (f.credit) notes.push(['info', 'Credit required: include the credit line wherever you share or show the print (see Credits).']);
+  if (f.sa) notes.push(['info', 'Share-alike (SA): if you share the finished collage, use the same licence.']);
+  if (f.free && !f.credit) notes.push(['ok', 'Free to use and edit; a credit is appreciated but not required.']);
+  return notes;
+}
+
+// the licence dialog (opened from a sticker's licence chip)
+function showLicence(item) {
+  const src = item.source;
+  const box = $('#licenceBody');
+  box.innerHTML = '';
+  const row = (label, value, href) => {
+    if (!value) return;
+    const p = document.createElement('p');
+    p.innerHTML = '<b></b> ';
+    p.querySelector('b').textContent = label + ':';
+    if (href) { const a = document.createElement('a'); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = value; p.appendChild(a); }
+    else p.appendChild(document.createTextNode(value));
+    box.appendChild(p);
+  };
+  row('Title', src.title);
+  row('Creator', src.creator, src.creatorUrl);
+  row('Licence', licenceShort(src), src.licenseUrl);
+  row('From', src.source || src.provider);
+  row('Source page', src.pageUrl ? 'Open the original' : '', src.pageUrl);
+  for (const [kind, text] of licenceNotes(src)) {
+    const n = document.createElement('p');
+    n.className = 'lic-note ' + kind;
+    n.textContent = text;
+    box.appendChild(n);
+  }
+  const credit = document.createElement('p');
+  credit.className = 'lic-credit';
+  credit.textContent = creditLine(src);
+  box.appendChild(credit);
+  $('#licenceTitle').textContent = item.name;
+  $('#licenceDialog').showModal();
+}
+
+// ---- credits list
+function creditsText(scope) {
+  const onPrint = onPrintCounts();
+  const items = library.filter((i) => i.source && (scope === 'all' || onPrint[i.id]));
+  const seen = new Set(), lines = [];
+  for (const i of items) {
+    const line = creditLine(i.source);
+    const key = i.source.pageUrl || line;
+    if (seen.has(key)) continue; // copies / duplicates of the same image are credited once
+    seen.add(key);
+    lines.push(line);
+  }
+  const own = library.filter((i) => !i.source && (scope === 'all' || onPrint[i.id])).length;
+  const head = `Image credits — ${projectName}`;
+  if (!lines.length) return { text: `${head}\n\nAll images are your own${own ? '' : ' (no stickers yet)'} — nothing to credit.`, count: 0 };
+  return {
+    text: `${head}\n\n${lines.map((l, n) => `${n + 1}. ${l}`).join('\n')}${own ? `\n\nPlus ${own} image${own === 1 ? '' : 's'} of your own.` : ''}\n`,
+    count: lines.length,
+  };
+}
+function renderCredits() {
+  const { text, count } = creditsText($('#creditsScope').value);
+  $('#creditsText').value = text;
+  $('#creditsCount').textContent = count ? `${count} source${count === 1 ? '' : 's'} to credit.` : '';
+}
+$('#btnCredits').addEventListener('click', () => { renderCredits(); $('#creditsDialog').showModal(); });
+$('#creditsScope').addEventListener('change', renderCredits);
+$('#creditsCopy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($('#creditsText').value); status('Credits copied to the clipboard.'); }
+  catch { $('#creditsText').select(); status('Select-all done — press Ctrl+C (⌘C) to copy.'); }
+});
+$('#creditsDownload').addEventListener('click', () => {
+  downloadBlob(new Blob([$('#creditsText').value], { type: 'text/plain;charset=utf-8' }), `${slugify(projectName)}-credits.txt`);
+});
 
 // ---------------------------------------------------------------- theme
 // 'auto' follows the system setting; the choice is remembered in this browser.

@@ -13,15 +13,15 @@ Open http://localhost:5173. You need Node 18+. There's nothing to install.
 ### On your phone or tablet
 Put the phone on the same Wi-Fi as the computer and open `http://<your-computer's-IP>:5173`. Run `ipconfig` to find the IPv4 address. Windows may ask once to allow Node through the firewall.
 
-### Optional: Google Images
-Openverse (openly licensed images, no key needed) is the default search source. To enable Google as well, set these before starting:
+### Image search sources
+**Openverse** and **Wikimedia Commons** work without a key. Unsplash and Pexels need a free key from each site; set it before starting the server:
 
 ```
-set GOOGLE_API_KEY=...   (PowerShell: $env:GOOGLE_API_KEY="...")
-set GOOGLE_CX=...        (a Programmable Search Engine ID with image search on)
+set UNSPLASH_ACCESS_KEY=...   (PowerShell: $env:UNSPLASH_ACCESS_KEY="...")   free key: https://unsplash.com/developers
+set PEXELS_API_KEY=...        (PowerShell: $env:PEXELS_API_KEY="...")        free key: https://www.pexels.com/api/
 ```
 
-Note: Google has closed the Custom Search JSON API to new customers, so this only works if you already have access.
+The keys stay on your computer: the browser never sees them. Google Images (`GOOGLE_API_KEY` and `GOOGLE_CX`) still works if you already have access, but Google has closed it to new customers.
 
 ## Features
 - **Stickers:** upload, drag and drop or paste images (Ctrl/⌘+V, or the *Paste* button), including a copied link to an image. You can also search online. Tick a sticker to use it and set how many copies the random layout should place. Click a sticker's name to rename it. *Place* adds a single copy. *Duplicate* makes a separate sticker from the same image, for example to crop a different part of it; *Reset to original* in the editor returns to the full source image. The *Copies for ticked* bar sets a number of copies, or adds or removes one, for every ticked sticker at once.
@@ -50,6 +50,10 @@ Note: Google has closed the Custom Search JSON API to new customers, so this onl
 - **Grid & rulers:** rulers in cm, in or px follow the zoom and highlight the selection. A grid with a choice of spacing is drawn under the stickers and never printed, and with snapping on, items also snap to it. These preferences are remembered in the browser.
 - **Zoom & pan:** the zoom slider, −/+ buttons, *Fit*, and clicking the % to jump to 100% (actual print pixels). With a mouse or trackpad, scroll to pan and Ctrl/⌘ + scroll or a trackpad pinch to zoom at the pointer. Hold Space and drag, or middle-drag, to pan. The shortcuts are Ctrl + = / − / 0. On touch screens, pinch on empty space to zoom and drag empty space with one finger to pan. Anything hanging off the page is dimmed, because it won't print.
 - **Dark mode:** the ◐/☾/☀ button in the header switches between following the system, always dark and always light. The print itself keeps its own colours.
+- **Licences & credits:** stickers from image search or a pasted link keep their title, creator, licence and source page.
+  - A chip under the sticker's name opens the details. It warns about *no derivatives* (cut-outs and edits may not be allowed), *non-commercial* (fine for yourself, not for selling), *share-alike* and unknown licences.
+  - Search can be limited to images you may change, or may sell.
+  - **Credits** builds the list of credit lines for the stickers on the print, or the whole project, to copy or download. Exporting can download it too, and does so by default when a licence requires credit.
 - **Finding stickers:** search by name or `#tag` (accents are ignored), and sort by order added, name, copies, how many are on the print, or ticked first.
   - Add tags with *+ tag*; separate several with commas. Click a tag to filter by it.
   - Images added from search are tagged with the search words.

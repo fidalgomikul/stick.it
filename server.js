@@ -1,12 +1,17 @@
 // Collage Studio — tiny zero-dependency dev server.
-// Serves the static app from ./public and provides two helper endpoints:
-//   GET /api/search?q=...&page=1   → image search (Openverse by default, Google CSE if configured)
-//   GET /api/proxy?url=...         → fetches a remote image so the browser can use it on a canvas
-//                                    without CORS "tainting" (needed for export).
+// Serves the static app from ./public and provides helper endpoints:
+//   GET /api/search?provider=…&q=…&page=1  → image search, results in one common format with licence info
+//   GET /api/proxy?url=…                    → fetches a remote image so the browser can use it on a canvas
+//                                             without CORS "tainting" (needed for export)
+//   GET /api/config                         → which optional search providers have keys configured
+//   GET /api/unsplash-download?loc=…        → tells Unsplash a photo was used (their API terms require it)
 //
 // Run:  node server.js            (then open http://localhost:5173)
-// Optional Google Programmable Search (Custom Search JSON API):
-//   set GOOGLE_API_KEY=...  and  set GOOGLE_CX=...   before starting.
+// Search providers:
+//   Openverse, Wikimedia Commons — free, no key needed
+//   Unsplash  — set UNSPLASH_ACCESS_KEY=…  (free key: https://unsplash.com/developers)
+//   Pexels    — set PEXELS_API_KEY=…       (free key: https://www.pexels.com/api/)
+//   Google    — set GOOGLE_API_KEY=… and GOOGLE_CX=… (Custom Search; closed to new customers)
 
 const http = require('http');
 const fs = require('fs');
@@ -16,6 +21,7 @@ const PORT = Number(process.env.PORT) || 5173;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const MAX_PROXY_BYTES = 25 * 1024 * 1024;
 const UA = 'CollageStudio/0.1 (local dev)';
+const PAGE_SIZE = 20;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -32,26 +38,124 @@ function sendJson(res, status, obj) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(obj));
 }
+const stripHtml = (s) => String(s || '').replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
 
-async function searchOpenverse(q, page) {
+/*
+ * Every provider returns results shaped like:
+ * { id, title, thumb, full, width, height, source, pageUrl,
+ *   license, licenseUrl, creator, creatorUrl, attribution, provider, downloadLocation? }
+ */
+
+async function searchOpenverse(q, page, filters) {
   const url = new URL('https://api.openverse.org/v1/images/');
   url.searchParams.set('q', q);
   url.searchParams.set('page', String(page));
-  url.searchParams.set('page_size', '20'); // anonymous limit
+  url.searchParams.set('page_size', String(PAGE_SIZE)); // anonymous limit
+  const types = [filters.editable && 'modification', filters.commercial && 'commercial'].filter(Boolean);
+  if (types.length) url.searchParams.set('license_type', types.join(','));
   const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } });
   if (!r.ok) throw new Error(`Openverse responded ${r.status}`);
   const data = await r.json();
-  return (data.results || []).map((it) => ({
-    id: it.id,
-    title: it.title || 'Untitled',
-    thumb: it.thumbnail || it.url,
-    full: it.url,
-    width: it.width,
-    height: it.height,
-    source: it.source,
-    pageUrl: it.foreign_landing_url,
-    license: `${(it.license || '').toUpperCase()} ${it.license_version || ''}`.trim(),
-    creator: it.creator || '',
+  return (data.results || []).map((it) => {
+    const license = it.license === 'cc0' ? 'CC0' : it.license === 'pdm' ? 'Public domain' : `CC ${(it.license || '').toUpperCase()} ${it.license_version || ''}`.trim();
+    return {
+      id: 'ov-' + it.id, provider: 'openverse',
+      title: it.title || 'Untitled',
+      thumb: it.thumbnail || it.url, full: it.url,
+      width: it.width, height: it.height,
+      source: it.source, pageUrl: it.foreign_landing_url,
+      license, licenseUrl: it.license_url || '',
+      creator: it.creator || '', creatorUrl: it.creator_url || '',
+      attribution: it.attribution || '',
+    };
+  });
+}
+
+async function searchWikimedia(q, page, filters) {
+  const url = new URL('https://commons.wikimedia.org/w/api.php');
+  const params = {
+    action: 'query', format: 'json', generator: 'search', gsrnamespace: '6',
+    gsrsearch: `filetype:bitmap ${q}`, gsrlimit: String(PAGE_SIZE), gsroffset: String((page - 1) * PAGE_SIZE),
+    prop: 'imageinfo', iiprop: 'url|size|extmetadata', iiurlwidth: '360',
+    iiextmetadatafilter: 'LicenseShortName|LicenseUrl|Artist|ObjectName|AttributionRequired|NonFree',
+  };
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } });
+  if (!r.ok) throw new Error(`Wikimedia Commons responded ${r.status}`);
+  const data = await r.json();
+  const pages = Object.values(data.query?.pages || {}).sort((a, b) => (a.index || 0) - (b.index || 0));
+  return pages.map((p) => {
+    const ii = p.imageinfo?.[0];
+    if (!ii) return null;
+    const md = ii.extmetadata || {};
+    const license = stripHtml(md.LicenseShortName?.value) || 'See source page';
+    const creator = stripHtml(md.Artist?.value);
+    // a large rendition instead of a possibly huge original. Commons only serves standard thumbnail
+    // widths (… 1920, 3840); other widths are refused, so ask for 3840 when the original is bigger.
+    const step = (w) => ii.thumburl && ii.thumburl.replace(/\/\d+px-([^/]+)$/, `/${w}px-$1`);
+    const full = ii.width > 3840 && ii.thumburl ? step(3840) : ii.url;
+    // Commons rate-limits downloads of originals; if one is refused, the app falls back to this
+    const fallbackWidth = [3840, 1920, 1280, 960].find((w) => w < ii.width);
+    const fullFallback = fallbackWidth && ii.thumburl ? step(fallbackWidth) : '';
+    const title = stripHtml(md.ObjectName?.value) || p.title.replace(/^File:/, '').replace(/\.[a-z0-9]+$/i, '');
+    return {
+      id: 'wm-' + p.pageid, provider: 'wikimedia',
+      title, thumb: ii.thumburl || ii.url, full, fullFallback,
+      width: ii.width, height: ii.height,
+      source: 'Wikimedia Commons', pageUrl: ii.descriptionurl,
+      license, licenseUrl: md.LicenseUrl?.value || '',
+      creator, creatorUrl: '',
+      attribution: `"${title}"${creator ? ` by ${creator}` : ''}, ${license}, via Wikimedia Commons`,
+      nonFree: md.NonFree?.value === 'true',
+    };
+  }).filter(Boolean).filter((it) => {
+    if (it.nonFree) return false;
+    if (filters.editable && /\bND\b/i.test(it.license)) return false;     // "no derivatives"
+    if (filters.commercial && /\bNC\b/i.test(it.license)) return false;   // "non-commercial"
+    return true;
+  });
+}
+
+const utm = (u) => u && `${u}${u.includes('?') ? '&' : '?'}utm_source=collage_studio&utm_medium=referral`; // Unsplash asks for these on links
+
+async function searchUnsplash(q, page) {
+  const url = new URL('https://api.unsplash.com/search/photos');
+  url.searchParams.set('query', q);
+  url.searchParams.set('page', String(page));
+  url.searchParams.set('per_page', String(PAGE_SIZE));
+  const r = await fetch(url, { headers: { 'User-Agent': UA, 'Accept-Version': 'v1', Authorization: `Client-ID ${process.env.UNSPLASH_ACCESS_KEY}` } });
+  if (!r.ok) throw new Error(`Unsplash responded ${r.status}`);
+  const data = await r.json();
+  return (data.results || []).map((p) => ({
+    id: 'us-' + p.id, provider: 'unsplash',
+    title: p.alt_description || p.description || 'Unsplash photo',
+    thumb: p.urls?.small, full: `${p.urls?.raw}&w=3000&fm=jpg&q=90`,
+    width: p.width, height: p.height,
+    source: 'Unsplash', pageUrl: utm(p.links?.html),
+    license: 'Unsplash License', licenseUrl: 'https://unsplash.com/license',
+    creator: p.user?.name || '', creatorUrl: utm(p.user?.links?.html),
+    attribution: `Photo by ${p.user?.name || 'unknown'} on Unsplash`,
+    downloadLocation: p.links?.download_location,
+  }));
+}
+
+async function searchPexels(q, page) {
+  const url = new URL('https://api.pexels.com/v1/search');
+  url.searchParams.set('query', q);
+  url.searchParams.set('page', String(page));
+  url.searchParams.set('per_page', String(PAGE_SIZE));
+  const r = await fetch(url, { headers: { 'User-Agent': UA, Authorization: process.env.PEXELS_API_KEY } });
+  if (!r.ok) throw new Error(`Pexels responded ${r.status}`);
+  const data = await r.json();
+  return (data.photos || []).map((p) => ({
+    id: 'px-' + p.id, provider: 'pexels',
+    title: p.alt || 'Pexels photo',
+    thumb: p.src?.medium, full: `${p.src?.original}?auto=compress&cs=tinysrgb&w=3000`,
+    width: p.width, height: p.height,
+    source: 'Pexels', pageUrl: p.url,
+    license: 'Pexels License', licenseUrl: 'https://www.pexels.com/license/',
+    creator: p.photographer || '', creatorUrl: p.photographer_url || '',
+    attribution: `Photo by ${p.photographer || 'unknown'} on Pexels`,
   }));
 }
 
@@ -67,31 +171,47 @@ async function searchGoogle(q, page) {
   if (!r.ok) throw new Error(`Google responded ${r.status}`);
   const data = await r.json();
   return (data.items || []).map((it, i) => ({
-    id: `g${page}-${i}`,
+    id: `g${page}-${i}`, provider: 'google',
     title: it.title || 'Untitled',
-    thumb: it.image?.thumbnailLink || it.link,
-    full: it.link,
-    width: it.image?.width,
-    height: it.image?.height,
-    source: it.displayLink,
-    pageUrl: it.image?.contextLink,
-    license: 'Unknown — check source',
-    creator: '',
+    thumb: it.image?.thumbnailLink || it.link, full: it.link,
+    width: it.image?.width, height: it.image?.height,
+    source: it.displayLink, pageUrl: it.image?.contextLink,
+    license: 'Unknown — check the source', licenseUrl: '',
+    creator: '', creatorUrl: '', attribution: '',
   }));
 }
 
+const PROVIDERS = {
+  openverse: { search: searchOpenverse, ready: () => true },
+  wikimedia: { search: searchWikimedia, ready: () => true },
+  unsplash: { search: searchUnsplash, ready: () => !!process.env.UNSPLASH_ACCESS_KEY, needs: 'UNSPLASH_ACCESS_KEY' },
+  pexels: { search: searchPexels, ready: () => !!process.env.PEXELS_API_KEY, needs: 'PEXELS_API_KEY' },
+  google: { search: searchGoogle, ready: () => !!(process.env.GOOGLE_API_KEY && process.env.GOOGLE_CX), needs: 'GOOGLE_API_KEY and GOOGLE_CX' },
+};
+
 async function handleSearch(reqUrl, res) {
-  const q = (reqUrl.searchParams.get('q') || '').trim();
+  const q = (reqUrl.searchParams.get('q') || '').trim().slice(0, 200);
   const page = Math.max(1, Math.min(20, Number(reqUrl.searchParams.get('page')) || 1));
-  const wanted = reqUrl.searchParams.get('provider') || 'openverse';
+  const name = reqUrl.searchParams.get('provider') || 'openverse';
+  const filters = { editable: reqUrl.searchParams.get('editable') === '1', commercial: reqUrl.searchParams.get('commercial') === '1' };
+  const provider = PROVIDERS[name];
   if (!q) return sendJson(res, 400, { error: 'Missing query' });
-  const googleReady = !!(process.env.GOOGLE_API_KEY && process.env.GOOGLE_CX);
+  if (!provider) return sendJson(res, 400, { error: 'Unknown provider' });
+  if (!provider.ready()) return sendJson(res, 400, { error: `This search needs a key on the server: set ${provider.needs} before starting it (see the README).` });
   try {
-    if (wanted === 'google') {
-      if (!googleReady) return sendJson(res, 400, { error: 'Google search is not configured on the server (set GOOGLE_API_KEY and GOOGLE_CX).' });
-      return sendJson(res, 200, { provider: 'google', results: await searchGoogle(q, page) });
-    }
-    return sendJson(res, 200, { provider: 'openverse', results: await searchOpenverse(q, page) });
+    return sendJson(res, 200, { provider: name, results: await provider.search(q, page, filters) });
+  } catch (e) {
+    return sendJson(res, 502, { error: e.message });
+  }
+}
+
+/** Unsplash's API terms: when a photo is used, call its download_location (with our key). */
+async function handleUnsplashDownload(reqUrl, res) {
+  const loc = reqUrl.searchParams.get('loc') || '';
+  if (!process.env.UNSPLASH_ACCESS_KEY || !/^https:\/\/api\.unsplash\.com\//.test(loc)) return sendJson(res, 400, { error: 'Bad request' });
+  try {
+    const r = await fetch(loc, { headers: { 'User-Agent': UA, Authorization: `Client-ID ${process.env.UNSPLASH_ACCESS_KEY}` } });
+    return sendJson(res, r.ok ? 200 : 502, { ok: r.ok });
   } catch (e) {
     return sendJson(res, 502, { error: e.message });
   }
@@ -137,8 +257,9 @@ http.createServer((req, res) => {
   if (reqUrl.pathname === '/api/search') return handleSearch(reqUrl, res);
   if (reqUrl.pathname === '/api/proxy') return handleProxy(reqUrl, res);
   if (reqUrl.pathname === '/api/config') {
-    return sendJson(res, 200, { google: !!(process.env.GOOGLE_API_KEY && process.env.GOOGLE_CX) });
+    return sendJson(res, 200, Object.fromEntries(Object.entries(PROVIDERS).map(([k, p]) => [k, p.ready()])));
   }
+  if (reqUrl.pathname === '/api/unsplash-download') return handleUnsplashDownload(reqUrl, res);
   return handleStatic(reqUrl, res);
 }).listen(PORT, () => {
   console.log(`Collage Studio running at http://localhost:${PORT}`);

@@ -50,6 +50,7 @@
         <div class="library-head">
           <span id="libCount">0 stickers</span>
           <span class="row gap-sm">
+            <button class="link" id="btnCredits" title="Credits for images from the web">Credits</button>
             <button class="link" id="btnSelectAll">All</button>
             <button class="link" id="btnSelectNone">None</button>
           </span>
@@ -536,12 +537,19 @@
     </div>
     <form id="searchForm" class="row gap">
       <input id="searchQuery" type="search" placeholder="e.g. vintage botanical illustration" required />
-      <select id="searchProvider">
+      <select id="searchProvider" aria-label="Where to search">
         <option value="openverse">Openverse (openly licensed)</option>
+        <option value="wikimedia">Wikimedia Commons</option>
+        <option value="unsplash">Unsplash</option>
+        <option value="pexels">Pexels</option>
         <option value="google">Google Images</option>
       </select>
       <button class="primary" type="submit">Search</button>
     </form>
+    <div id="searchFilters" class="row gap wrap search-filters">
+      <label class="check"><input id="searchEditable" type="checkbox" checked /> Only images I may change (cut out, crop)</label>
+      <label class="check"><input id="searchCommercial" type="checkbox" /> Only images I may sell</label>
+    </div>
     <p class="hint" id="searchNote">Click images to select them, then add them to your stickers. Check each image's license before printing.</p>
     <div id="searchResults" class="search-grid"></div>
     <div class="modal-foot">
@@ -586,6 +594,36 @@
     <div id="collEmpty" class="empty hidden">No collections yet.</div>
   </dialog>
 
+  <!-- Licence of one sticker -->
+  <dialog id="licenceDialog" class="modal">
+    <div class="modal-head">
+      <h2 id="licenceTitle">Licence</h2>
+      <button class="icon" data-close>✕</button>
+    </div>
+    <div id="licenceBody" class="licence-body"></div>
+  </dialog>
+
+  <!-- Credits -->
+  <dialog id="creditsDialog" class="modal">
+    <div class="modal-head">
+      <h2>Image credits</h2>
+      <button class="icon" data-close>✕</button>
+    </div>
+    <label>Include
+      <select id="creditsScope">
+        <option value="print">Stickers on the print</option>
+        <option value="all">All stickers in this project</option>
+      </select>
+    </label>
+    <textarea id="creditsText" class="credits-text" rows="10" readonly></textarea>
+    <p class="hint" id="creditsCount"></p>
+    <p class="hint">Many open licences (CC BY…) ask you to credit the creator wherever the work is shown, so keep this with the print, e.g. on the back of the frame or with a photo of it you post.</p>
+    <div class="modal-foot">
+      <button id="creditsCopy">Copy</button>
+      <button id="creditsDownload" class="primary">Download .txt</button>
+    </div>
+  </dialog>
+
   <!-- Export -->
   <dialog id="exportDialog" class="modal">
     <div class="modal-head">
@@ -601,6 +639,7 @@
       </select>
     </label>
     <p class="hint" id="exportWarn"></p>
+    <label class="check hidden" id="exportCreditsRow"><input id="exportCredits" type="checkbox" /> Also download the image credits (.txt) <span class="hint" id="exportCreditsCount"></span></label>
     <div class="modal-foot">
       <button data-close>Cancel</button>
       <button id="exportGo" class="primary">Download</button>
