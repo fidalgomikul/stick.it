@@ -6,7 +6,10 @@ import {
   removeColorAt, trimTransparent, renderSticker, lookNeedsRender, insertDpiMetadata,
   DEFAULT_ADJUST, DEFAULT_MASK, DEFAULT_EDGES, DEFAULT_SHADOW,
 } from './imaging.js';
-import { encodeProjectFile, decodeProjectFile, autosaveWrite, autosaveRead, autosaveClear } from './project.js';
+import {
+  encodeProjectFile, decodeProjectFile, saveProject, loadProject, listProjects, deleteProject, duplicateProject,
+  saveCollection, listCollections, loadCollection, renameCollection, deleteCollection, getSetting, setSetting,
+} from './project.js';
 import { computeLayout, AUTO_SIZE_STYLES, OVERLAP_STYLES } from './layouts.js';
 import { DEFAULT_BACKGROUND, paintBackground } from './backgrounds.js';
 import { jpegToPdf } from './pdf.js';
@@ -3265,6 +3268,7 @@ $('#genKeepText').addEventListener('change', () => markDirty());
 const PROJECT_VERSION = 1;
 let persistReady = false;   // false while booting or restoring, so half-built state is never autosaved
 let saveTimer = null, saving = false, dirtyWhileSaving = false, unsaved = false;
+let changeSeq = 0; // counts changes, so a save only counts as complete if nothing changed while it ran
 
 /**
  * Something in the collage changed. Autosave is always scheduled. For undo, each user action becomes
@@ -3283,6 +3287,7 @@ function markDirty(kind) {
 
 function scheduleAutosave() {
   unsaved = true;
+  changeSeq++;
   $('#saveState').textContent = 'Saving…';
   clearTimeout(saveTimer);
   saveTimer = setTimeout(runAutosave, 1200);
@@ -3294,10 +3299,14 @@ canvas.on('text:editing:exited', () => markDirty());        // …is one step pe
 async function runAutosave() {
   if (saving) { dirtyWhileSaving = true; return; }
   saving = true;
+  const seqAtStart = changeSeq;
   try {
+    if (!currentSaved && projectIsBlank()) { unsaved = false; $('#saveState').textContent = ''; return; } // nothing to keep yet
     const { meta, blobs } = await serializeProject();
-    await autosaveWrite(meta, blobs);
-    unsaved = false;
+    const thumb = await makeThumbnail().catch(() => null);
+    await saveProject(currentProjectId, meta, blobs, thumb);
+    if (!currentSaved) { currentSaved = true; await setSetting('currentProject', currentProjectId); }
+    unsaved = changeSeq !== seqAtStart; // edits made during the save still need saving
     $('#saveState').textContent = 'Saved in this browser';
     $('#saveState').title = 'Autosaved ' + new Date().toLocaleTimeString();
   } catch (e) {
@@ -3306,7 +3315,7 @@ async function runAutosave() {
     $('#saveState').title = e.message;
   } finally {
     saving = false;
-    if (dirtyWhileSaving) { dirtyWhileSaving = false; scheduleAutosave(); }
+    if (dirtyWhileSaving || unsaved) { dirtyWhileSaving = false; scheduleAutosave(); }
   }
 }
 
@@ -3336,19 +3345,47 @@ $('#projectName').addEventListener('keydown', (e) => {
 });
 $('#projectName').addEventListener('focus', (e) => e.target.select());
 
+/** Stickers as plain JSON; images are referenced by key (keyFor collects their data). */
+async function serializeLibraryItems(items, keyFor) {
+  const out = [];
+  for (const item of items) {
+    const steps = [];
+    for (const st of item.steps) steps.push({ key: await keyFor(st.url), w: st.w, h: st.h, ox: st.ox, oy: st.oy });
+    // the finished look (outline, shape…) is slow to re-render, so it's stored too
+    const finalKey = lookNeedsRender(lookOf(item)) ? await keyFor(item.finalUrl) : null;
+    out.push({ id: item.id, name: item.name, use: item.use, count: item.count, outline: { ...item.outline }, ...lookCopies(item), steps, finalKey, tags: [...(item.tags || [])], size: item.size || 1 });
+  }
+  return out;
+}
+/** key → object URL, registering each blob once. */
+function urlMaker(blobs) {
+  const urlForKey = new Map();
+  return (key) => {
+    if (!urlForKey.has(key)) {
+      const blob = blobs.get(key);
+      if (!blob) throw new Error('Some image data is missing.');
+      urlForKey.set(key, registerBlob(blob, key));
+    }
+    return urlForKey.get(key);
+  };
+}
+/** A library item from its saved JSON. */
+async function buildLibraryItem(s, urlOf) {
+  const steps = s.steps.map((st) => ({ url: urlOf(st.key), w: st.w, h: st.h, ox: st.ox, oy: st.oy }));
+  let finalUrl = s.finalKey ? urlOf(s.finalKey) : steps[steps.length - 1].url;
+  if (!s.finalKey && lookNeedsRender({ ...lookCopies(s), outline: s.outline })) { // older saves: rebuild the finished look
+    finalUrl = await canvasToUrl(renderSticker(await loadImage(steps[steps.length - 1].url), { ...lookCopies(s), outline: s.outline }, 0, { trim: true }));
+  }
+  const finalImg = await loadImage(finalUrl);
+  return { id: s.id, name: s.name, use: s.use, count: s.count, outline: { ...s.outline }, ...lookCopies(s), steps, finalUrl, finalImg, tags: [...(s.tags || [])], size: s.size || 1 };
+}
+
 /** Snapshot everything into { meta (JSON), blobs (Map key → Blob) }. */
 async function serializeProject() {
   const blobs = new Map();
   const keyFor = async (url) => { const e = await blobEntry(url); blobs.set(e.key, e.blob); return e.key; };
 
-  const lib = [];
-  for (const item of library) {
-    const steps = [];
-    for (const st of item.steps) steps.push({ key: await keyFor(st.url), w: st.w, h: st.h, ox: st.ox, oy: st.oy });
-    // the outlined result is slow to re-render, so it's stored too
-    const finalKey = lookNeedsRender(lookOf(item)) ? await keyFor(item.finalUrl) : null;
-    lib.push({ id: item.id, name: item.name, use: item.use, count: item.count, outline: { ...item.outline }, ...lookCopies(item), steps, finalKey, tags: [...(item.tags || [])], size: item.size || 1 });
-  }
+  const lib = await serializeLibraryItems(library, keyFor);
 
   const meta = {
     app: 'collage-studio', version: PROJECT_VERSION, savedAt: new Date().toISOString(), name: projectName,
@@ -3475,24 +3512,10 @@ async function restoreProject(meta, blobs) {
     applyLayoutSettings(meta.layout);
 
     // stickers
-    const urlForKey = new Map();
-    const urlOf = (key) => {
-      if (!urlForKey.has(key)) {
-        const blob = blobs.get(key);
-        if (!blob) throw new Error('The project is missing some image data.');
-        urlForKey.set(key, registerBlob(blob, key));
-      }
-      return urlForKey.get(key);
-    };
+    const urlOf = urlMaker(blobs);
     let maxId = 0;
     for (const s of meta.library) {
-      const steps = s.steps.map((st) => ({ url: urlOf(st.key), w: st.w, h: st.h, ox: st.ox, oy: st.oy }));
-      let finalUrl = s.finalKey ? urlOf(s.finalKey) : steps[steps.length - 1].url;
-      if (!s.finalKey && lookNeedsRender({ ...lookCopies(s), outline: s.outline })) { // older saves: rebuild the finished look
-        finalUrl = await canvasToUrl(renderSticker(await loadImage(steps[steps.length - 1].url), { ...lookCopies(s), outline: s.outline }, 0, { trim: true }));
-      }
-      const finalImg = await loadImage(finalUrl);
-      library.push({ id: s.id, name: s.name, use: s.use, count: s.count, outline: { ...s.outline }, ...lookCopies(s), steps, finalUrl, finalImg, tags: [...(s.tags || [])], size: s.size || 1 });
+      library.push(await buildLibraryItem(s, urlOf));
       maxId = Math.max(maxId, Number(String(s.id).replace(/\D/g, '')) || 0);
     }
     uid = Math.max(uid, maxId);
@@ -3613,7 +3636,7 @@ $('#btnSaveProject').addEventListener('click', async () => {
     const file = encodeProjectFile(meta, blobs);
     const name = projectName === DEFAULT_PROJECT_NAME
       ? `collage-${new Date().toISOString().slice(0, 10)}.collage`
-      : `${projectSlug()}.collage`;
+      : `${slugify(projectName)}.collage`;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(file);
     a.download = name;
@@ -3630,14 +3653,14 @@ $('#projectInput').addEventListener('change', async (e) => {
   const file = e.target.files[0];
   e.target.value = '';
   if (!file) return;
-  if ((library.length || canvas.getObjects().length) &&
-      !confirm('Open this project? The current collage will be replaced (save it first if you want to keep it).')) return;
   status(`Opening ${file.name}…`, true);
   try {
+    await flushSave(); // the current collage stays in Projects
     const { meta, blobs } = await decodeProjectFile(file);
     await restoreProject(meta, blobs);
     if (!meta.name) setProjectName(file.name.replace(/\.collage$/i, '').replace(/[-_]+/g, ' ')); // older files had no name
-    scheduleAutosave();
+    currentProjectId = newProjectId(); currentSaved = false; unsaved = true;
+    await runAutosave(); // keep it as a new project right away
     resetHistory();
     status(`Opened ${file.name}.`);
   } catch (err) {
@@ -3645,9 +3668,67 @@ $('#projectInput').addEventListener('change', async (e) => {
   }
 });
 
-$('#btnNewProject').addEventListener('click', async () => {
-  if ((library.length || canvas.getObjects().length) &&
-      !confirm('Start a new, empty collage? The current one will be cleared from this browser (save it first if you want to keep it).')) return;
+$('#btnNewProject').addEventListener('click', () => startNewProject());
+
+window.addEventListener('beforeunload', (e) => {
+  if (unsaved && (library.length || canvas.getObjects().length)) { e.preventDefault(); e.returnValue = ''; }
+});
+
+// ---------------------------------------------------------------- projects (several, kept in this browser)
+let currentProjectId = null;
+let currentSaved = false; // false until this project is first stored (an untouched new project isn't saved)
+const newProjectId = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const projectIsBlank = () => !library.length && !canvas.getObjects().length && projectName === DEFAULT_PROJECT_NAME;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** File-name-safe version of a name. */
+function slugify(name, fallback = 'collage') {
+  const slug = (name || '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').slice(0, 60);
+  return slug && name !== DEFAULT_PROJECT_NAME ? slug : fallback;
+}
+
+/** A small JPEG of the print for the projects list. */
+async function makeThumbnail(maxSide = 320) {
+  if (!print.W) return null;
+  const s = maxSide / Math.max(print.W, print.H);
+  const v = canvas.viewportTransform;
+  const full = canvas.toCanvasElement(s / zoom, { left: v[4], top: v[5], width: (print.W + 1) * zoom, height: (print.H + 1) * zoom });
+  const out = makeCanvas(Math.max(1, Math.round(print.W * s)), Math.max(1, Math.round(print.H * s)));
+  const g = out.getContext('2d');
+  g.scale(s, s);
+  paintPage(g);
+  g.setTransform(1, 0, 0, 1, 0, 0);
+  g.drawImage(full, 0, 0);
+  return canvasToBlob(out, 'image/jpeg', 0.8);
+}
+
+/** Finish any pending save of the current project (before switching away from it). */
+async function flushSave() {
+  for (let tries = 0; tries < 5; tries++) { // repeat if more changes arrive while saving
+    clearTimeout(saveTimer);
+    while (saving) await sleep(40);
+    if (!unsaved) return;
+    await runAutosave();
+  }
+}
+
+async function openProject(id) {
+  if (id === currentProjectId) return;
+  await flushSave();
+  status('Opening…', true);
+  const saved = await loadProject(id);
+  if (!saved) { status('That project could not be found.'); return; }
+  await restoreProject(saved.meta, saved.blobs);
+  currentProjectId = id; currentSaved = true; unsaved = false;
+  await setSetting('currentProject', id);
+  resetHistory();
+  $('#saveState').textContent = 'Saved in this browser';
+  status(`Opened “${projectName}”.`);
+}
+
+async function startNewProject({ save = true } = {}) {
+  if (save) await flushSave();
   persistReady = false;
   clearTimeout(saveTimer);
   resetWorkspace();
@@ -3660,18 +3741,227 @@ $('#btnNewProject').addEventListener('click', async () => {
   renderLibrary();
   updateCanvasStatus();
   refreshSelectionPanel();
-  await autosaveClear().catch(console.error);
-  unsaved = false;
+  currentProjectId = newProjectId(); currentSaved = false; unsaved = false;
   persistReady = true;
   resetHistory();
   $('#saveState').textContent = '';
   setProjectName(DEFAULT_PROJECT_NAME);
-  status('Started a new collage.');
+  status('Started a new collage. Your other projects are under Projects.');
+}
+
+function downloadBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+// ---- projects dialog
+const pjDialog = $('#projectsDialog');
+let pjThumbUrls = [];
+const relTime = (t) => {
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
+  const s = (t - Date.now()) / 1000;
+  for (const [unit, sec] of [['year', 31536000], ['month', 2592000], ['week', 604800], ['day', 86400], ['hour', 3600], ['minute', 60]]) {
+    if (Math.abs(s) >= sec) return rtf.format(Math.round(s / sec), unit);
+  }
+  return 'just now';
+};
+async function renderProjects() {
+  pjThumbUrls.forEach((u) => URL.revokeObjectURL(u));
+  pjThumbUrls = [];
+  const list = await listProjects();
+  const grid = $('#pjGrid');
+  grid.innerHTML = '';
+  $('#pjEmpty').classList.toggle('hidden', list.length > 0);
+  for (const p of list) {
+    const card = document.createElement('div');
+    const isCurrent = p.id === currentProjectId;
+    card.className = 'pj-card' + (isCurrent ? ' current' : '');
+    card.innerHTML = `
+      <div class="pj-thumb checker"></div>
+      <div class="pj-info"><div class="pj-name"></div><div class="hint pj-meta"></div><div class="hint pj-time"></div></div>
+      <div class="row gap-sm wrap pj-actions">
+        <button data-pj="open" class="primary">${isCurrent ? 'Open now' : 'Open'}</button>
+        <button data-pj="dup">Duplicate</button>
+        <button data-pj="dl" title="Download as a .collage file">Download</button>
+        <button data-pj="del" class="danger">Delete</button>
+      </div>`;
+    if (p.thumb) {
+      const url = URL.createObjectURL(p.thumb); pjThumbUrls.push(url);
+      const im = document.createElement('img'); im.src = url; im.alt = '';
+      card.querySelector('.pj-thumb').appendChild(im);
+    }
+    card.querySelector('.pj-name').textContent = p.name;
+    const sm = p.summary || {};
+    card.querySelector('.pj-meta').textContent = `${sm.size || ''} · ${sm.stickers ?? 0} sticker${sm.stickers === 1 ? '' : 's'} · ${sm.onPrint ?? 0} on the print`;
+    card.querySelector('.pj-time').textContent = 'Saved ' + relTime(p.savedAt);
+    card.querySelector('[data-pj=open]').disabled = isCurrent;
+    card.querySelector('[data-pj=open]').addEventListener('click', async () => { pjDialog.close(); await openProject(p.id); });
+    card.querySelector('[data-pj=dup]').addEventListener('click', async () => {
+      if (isCurrent) await flushSave();
+      await duplicateProject(p.id, newProjectId(), `${p.name} (copy)`);
+      renderProjects();
+    });
+    card.querySelector('[data-pj=dl]').addEventListener('click', async () => {
+      if (isCurrent) await flushSave();
+      const saved = await loadProject(p.id);
+      if (!saved) return;
+      const file = encodeProjectFile(saved.meta, saved.blobs);
+      downloadBlob(file, `${slugify(p.name)}.collage`);
+    });
+    card.querySelector('[data-pj=del]').addEventListener('click', async () => {
+      if (!confirm(`Delete “${p.name}” from this browser? This can't be undone. (Download it first if you want to keep a copy.)`)) return;
+      if (isCurrent) { clearTimeout(saveTimer); while (saving) await sleep(40); unsaved = false; }
+      await deleteProject(p.id);
+      if (isCurrent) {
+        const rest = (await listProjects())[0];
+        if (rest) { currentProjectId = null; await openProject(rest.id); } else await startNewProject({ save: false });
+      }
+      status(`Deleted “${p.name}”.`);
+      renderProjects();
+    });
+    grid.appendChild(card);
+  }
+  renderStorageInfo();
+}
+async function renderStorageInfo() {
+  if (!navigator.storage?.estimate) { $('#pjStorage').textContent = ''; return; }
+  const { usage = 0, quota = 0 } = await navigator.storage.estimate();
+  const mb = (n) => (n / 1e6 >= 1000 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(0.1, n / 1e6).toFixed(1)} MB`);
+  $('#pjStorage').textContent = `Using ${mb(usage)} of browser storage` + (quota ? ` (up to ${mb(quota)} available)` : '');
+  const persisted = navigator.storage.persisted ? await navigator.storage.persisted() : true;
+  $('#pjPersist').classList.toggle('hidden', persisted);
+}
+$('#btnProjects').addEventListener('click', async () => {
+  await flushSave(); // so the current project's card is up to date
+  await renderProjects();
+  pjDialog.showModal();
+});
+pjDialog.addEventListener('close', () => { pjThumbUrls.forEach((u) => URL.revokeObjectURL(u)); pjThumbUrls = []; });
+$('#pjNew').addEventListener('click', async () => { pjDialog.close(); await startNewProject(); });
+$('#pjImport').addEventListener('click', () => { pjDialog.close(); $('#projectInput').click(); });
+$('#pjPersist').addEventListener('click', async () => {
+  const ok = await navigator.storage.persist?.();
+  status(ok ? 'The browser will keep this app’s projects even when space runs low.' : 'The browser didn’t agree — download important projects to keep a copy.');
+  renderStorageInfo();
 });
 
-window.addEventListener('beforeunload', (e) => {
-  if (unsaved && (library.length || canvas.getObjects().length)) { e.preventDefault(); e.returnValue = ''; }
+// ---------------------------------------------------------------- sticker collections
+const collDialog = $('#collectionsDialog');
+let collThumbUrls = [];
+const newCollectionId = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const tickedShown = () => shownLibrary().filter((i) => i.use);
+
+/** Small JPEG previews of stickers, for the collections list. */
+async function stickerThumbs(items, max = 10) {
+  const out = [];
+  for (const it of items.slice(0, max)) {
+    const s = 72 / Math.max(it.finalImg.width, it.finalImg.height);
+    const c = makeCanvas(Math.max(1, Math.round(it.finalImg.width * s)), Math.max(1, Math.round(it.finalImg.height * s)));
+    const g = c.getContext('2d'); g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(it.finalImg, 0, 0, c.width, c.height);
+    out.push(await canvasToBlob(c, 'image/jpeg', 0.8));
+  }
+  return out;
+}
+async function collectionFromItems(items) {
+  const blobs = new Map();
+  const keyFor = async (url) => { const e = await blobEntry(url); blobs.set(e.key, e.blob); return e.key; };
+  const entries = await serializeLibraryItems(items, keyFor);
+  return { entries, blobs, thumbs: await stickerThumbs(items) };
+}
+
+async function renderCollections() {
+  collThumbUrls.forEach((u) => URL.revokeObjectURL(u));
+  collThumbUrls = [];
+  const ticked = tickedShown().length;
+  $('#collTickedInfo').textContent = ticked
+    ? `${ticked} ticked sticker${ticked === 1 ? '' : 's'} in this project can be saved.`
+    : 'Tick stickers in the Stickers list to save them as a collection.';
+  $('#collSave').disabled = !ticked;
+  const list = await listCollections();
+  const box = $('#collList');
+  box.innerHTML = '';
+  $('#collEmpty').classList.toggle('hidden', list.length > 0);
+  for (const col of list) {
+    const row = document.createElement('div');
+    row.className = 'coll-row';
+    row.innerHTML = `
+      <div class="coll-head"><b class="coll-name"></b> <span class="hint coll-count"></span></div>
+      <div class="coll-thumbs"></div>
+      <div class="row gap-sm wrap">
+        <button data-c="use" class="primary">Add to this project</button>
+        <button data-c="add" title="Add the ticked stickers of this project to the collection">Add ticked stickers</button>
+        <button data-c="ren">Rename</button>
+        <button data-c="del" class="danger">Delete</button>
+      </div>`;
+    row.querySelector('.coll-name').textContent = col.name;
+    row.querySelector('.coll-count').textContent = `${col.items.length} sticker${col.items.length === 1 ? '' : 's'}`;
+    for (const t of col.thumbs || []) {
+      const url = URL.createObjectURL(t); collThumbUrls.push(url);
+      const im = document.createElement('img'); im.src = url; im.alt = '';
+      row.querySelector('.coll-thumbs').appendChild(im);
+    }
+    row.querySelector('[data-c=add]').disabled = !ticked;
+    row.querySelector('[data-c=use]').addEventListener('click', async () => {
+      const n = await addCollectionToProject(col.id);
+      if (n) { collDialog.close(); status(`Added ${n} sticker${n === 1 ? '' : 's'} from “${col.name}”.`); }
+    });
+    row.querySelector('[data-c=add]').addEventListener('click', async () => {
+      const loaded = await loadCollection(col.id);
+      const extra = await collectionFromItems(tickedShown());
+      const blobs = new Map([...loaded.blobs, ...extra.blobs]);
+      await saveCollection(col.id, { name: col.name, items: [...loaded.record.items, ...extra.entries], thumbs: [...(loaded.record.thumbs || []), ...extra.thumbs].slice(0, 10) }, blobs);
+      status(`Added ${extra.entries.length} sticker${extra.entries.length === 1 ? '' : 's'} to “${col.name}”.`);
+      renderCollections();
+    });
+    row.querySelector('[data-c=ren]').addEventListener('click', async () => {
+      const name = prompt('Rename collection', col.name);
+      if (name && name.trim()) { await renameCollection(col.id, name.trim().slice(0, 60)); renderCollections(); }
+    });
+    row.querySelector('[data-c=del]').addEventListener('click', async () => {
+      if (!confirm(`Delete the collection “${col.name}”? Stickers already added to projects stay there.`)) return;
+      await deleteCollection(col.id);
+      renderCollections();
+    });
+    box.appendChild(row);
+  }
+}
+/** Copy a collection's stickers into the current project (one undo step). Returns how many were added. */
+async function addCollectionToProject(id) {
+  const loaded = await loadCollection(id);
+  if (!loaded) return 0;
+  holdHistory();
+  try {
+    const urlOf = urlMaker(loaded.blobs);
+    let n = 0;
+    for (const entry of loaded.record.items) {
+      const item = await buildLibraryItem({ ...entry, id: newId(), use: true, count: entry.count || 1 }, urlOf);
+      library.push(item);
+      n++;
+    }
+    renderLibrary();
+    return n;
+  } catch (e) {
+    console.error(e); status('Could not add that collection: ' + e.message); return 0;
+  } finally { releaseHistory(); }
+}
+$('#btnCollections').addEventListener('click', async () => { await renderCollections(); collDialog.showModal(); });
+collDialog.addEventListener('close', () => { collThumbUrls.forEach((u) => URL.revokeObjectURL(u)); collThumbUrls = []; });
+$('#collSave').addEventListener('click', async () => {
+  const items = tickedShown();
+  if (!items.length) return;
+  const name = ($('#collName').value.trim() || `Collection ${new Date().toLocaleDateString()}`).slice(0, 60);
+  $('#collSave').disabled = true;
+  try {
+    const c = await collectionFromItems(items);
+    await saveCollection(newCollectionId(), { name, items: c.entries, thumbs: c.thumbs }, c.blobs);
+    $('#collName').value = '';
+    status(`Saved ${items.length} sticker${items.length === 1 ? '' : 's'} as “${name}”.`);
+  } finally { renderCollections(); }
 });
+$('#collName').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#collSave').click(); });
 
 // ---------------------------------------------------------------- theme
 // 'auto' follows the system setting; the choice is remembered in this browser.
@@ -3708,16 +3998,19 @@ updateCanvasStatus();
 
 (async () => {
   try {
-    const saved = await autosaveRead();
-    if (saved && (saved.meta.library.length || saved.meta.objects.length || (saved.meta.name && saved.meta.name !== DEFAULT_PROJECT_NAME))) {
+    const id = await getSetting('currentProject');
+    const saved = id && await loadProject(id);
+    if (saved) {
       await restoreProject(saved.meta, saved.blobs);
+      currentProjectId = id; currentSaved = true;
       $('#saveState').textContent = 'Saved in this browser';
-      status(`Restored your collage from ${new Date(saved.savedAt).toLocaleString()}.`);
+      status(`Restored “${projectName}” from ${new Date(saved.savedAt).toLocaleString()}.`);
     }
   } catch (e) {
     console.error(e);
     status('Could not restore the autosaved collage: ' + e.message);
   } finally {
+    if (!currentProjectId) currentProjectId = newProjectId();
     persistReady = true;
     resetHistory();
   }

@@ -14,7 +14,8 @@
       <div class="brand">Collage Studio</div>
       <input id="projectName" class="project-name" type="text" maxlength="80" value="Untitled collage" aria-label="Project name" spellcheck="false" />
       <div class="row gap-sm project-actions">
-        <button id="btnNewProject" class="ghost" title="Start an empty collage">New</button>
+        <button id="btnProjects" class="ghost" title="All your collages in this browser">Projects</button>
+        <button id="btnNewProject" class="ghost" title="Start an empty collage (the current one stays in Projects)">New</button>
         <button id="btnOpenProject" class="ghost" title="Open a .collage project file">Open…</button>
         <button id="btnSaveProject" class="ghost" title="Download the whole project (images, layout, settings) as a .collage file">Save project</button>
         <input id="projectInput" type="file" accept=".collage" hidden />
@@ -40,6 +41,7 @@
             <input id="fileInput" type="file" accept="image/*" multiple hidden />
           </label>
           <button id="btnOpenSearch">Search online</button>
+          <button id="btnCollections" title="Reuse stickers across projects">Collections</button>
           <button id="btnPaste" title="Add an image (or image link) from the clipboard — or just press Ctrl+V / ⌘V">Paste</button>
         </div>
         <p class="hint">Drop image files anywhere on the page, or paste with Ctrl+V. Tick a sticker to use it, set how many copies the random layout should place.</p>
@@ -548,6 +550,40 @@
       <span id="searchSelCount" class="hint">0 selected</span>
       <button id="searchAdd" class="primary" disabled>Add to stickers</button>
     </div>
+  </dialog>
+
+  <!-- Projects -->
+  <dialog id="projectsDialog" class="modal wide">
+    <div class="modal-head">
+      <h2>Your projects</h2>
+      <button class="icon" data-close>✕</button>
+    </div>
+    <div class="row gap wrap pj-bar">
+      <button id="pjNew" class="primary">New collage</button>
+      <button id="pjImport">Open a .collage file…</button>
+      <span class="spacer"></span>
+      <span class="hint" id="pjStorage"></span>
+      <button id="pjPersist" class="hidden" title="Ask the browser not to clear this app's storage when disk space runs low">Protect from clean-up</button>
+    </div>
+    <div id="pjGrid" class="pj-grid"></div>
+    <div id="pjEmpty" class="empty hidden">No saved projects yet — your collage is saved here automatically as soon as you add something.</div>
+    <p class="hint">Projects are kept in this browser on this device. Use <b>Download</b> to keep a copy elsewhere or to move a project to another device.</p>
+  </dialog>
+
+  <!-- Sticker collections -->
+  <dialog id="collectionsDialog" class="modal wide">
+    <div class="modal-head">
+      <h2>Sticker collections</h2>
+      <button class="icon" data-close>✕</button>
+    </div>
+    <p class="hint">A collection keeps stickers — with all their edits — in this browser, so you can add them to any project.</p>
+    <div class="row gap wrap coll-bar">
+      <input id="collName" type="text" maxlength="60" placeholder="Name for a new collection" />
+      <button id="collSave" class="primary">Save ticked stickers as a new collection</button>
+    </div>
+    <p class="hint" id="collTickedInfo"></p>
+    <div id="collList" class="coll-list"></div>
+    <div id="collEmpty" class="empty hidden">No collections yet.</div>
   </dialog>
 
   <!-- Export -->

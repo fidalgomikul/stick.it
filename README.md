@@ -83,11 +83,14 @@ Note: Google has closed the Custom Search JSON API to new customers, so this onl
 - **Snap & align:** while dragging, items snap to the page edges and centre and to other items' edges and centres, with magenta guide lines. Rotation snaps to 0°, 45°, 90° and so on when you are within 4°. Hold Alt to drag freely, or turn snapping off with *Snap & guides* in the toolbar. In the Selection panel, one item aligns to the page and several items align to each other. *Space ↔ / ↕* spreads 3 or more items evenly.
 - **Undo / redo:** use the header buttons, Ctrl+Z, or Ctrl+Y / Ctrl+Shift+Z. They cover the print (stickers, text, layout), sticker edits, library changes and print settings. Each action is one step: a move, a delete, a button click, a whole random layout, a whole upload, or *Clear print*. Continuous input counts as one step when it ends: typing (when you leave the text box), dragging a colour picker (when you release it) or holding an arrow key (when you let go). History lasts for the browser session and is limited to 100 steps.
 - **Project name:** click the name next to "Collage Studio" in the header to rename the project. It is saved with the project and shown in the browser tab, and it names downloaded files, for example `Summer-trip-2026.collage` and `Summer-trip-2026-30x40cm-300dpi.png`.
-- **Save / load:**
-  - *Autosave:* your work is saved in this browser (IndexedDB) about a second after each change and comes back when you reopen the page.
-  - *Save project:* downloads a `.collage` file holding every image (original and edit steps), sticker settings, layout, text and print settings.
-  - *Open…* continues from a `.collage` file, and *New* starts an empty collage and clears the autosave.
-
+- **Projects:** every collage is kept in the browser and appears under **Projects** with a thumbnail, its size, sticker count and when it was last saved. From there you can open, duplicate, download (.collage) or delete it.
+  - *New* starts a fresh collage and keeps the current one in the list.
+  - *Open…* imports a .collage file as a new project.
+  - The app reopens the project you used last.
+  - Projects that use the same image share it in storage.
+  - The dialog shows how much browser storage is in use, and can ask the browser not to clear it when disk space runs low.
+- **Sticker collections:** save ticked stickers, with all their edits, as a named collection. Then add the whole collection to any other project, add more stickers to it later, rename it or delete it. Deleting a collection never removes stickers already added to projects.
+- **Save project:** downloads the current project as a .collage file, to back it up or move it to another device.
 - **Phones & touch:** on screens narrower than 900 px, the side panels become bottom sheets opened from a tab bar (*Stickers*, *Print & layout*, *Edit selection*).
   - While something is selected, a quick bar offers *Edit text*, *Duplicate*, *Forward*, *Back*, *Delete* and *More…*.
   - Pinch with two fingers to resize and rotate the selected item. Rotation snaps to straight angles.

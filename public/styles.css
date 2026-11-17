@@ -371,3 +371,22 @@ section.collapsed > :not(h2) { display: none !important; }
 .mat-presets { margin: 4px 0 8px; }
 .mat-presets button { padding: 3px 8px; font-size: 12px; }
 #matInfo b { color: var(--text); font-weight: 600; }
+
+/* projects */
+.pj-bar { margin-bottom: 12px; }
+.pj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; max-height: 60vh; overflow-y: auto; padding: 2px; }
+.pj-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; background: var(--panel); }
+.pj-card.current { border-color: var(--accent); box-shadow: 0 0 0 2px var(--toggle-on); }
+.pj-thumb { height: 160px; border-radius: 6px; display: grid; place-items: center; overflow: hidden; }
+.pj-thumb img { max-width: 100%; max-height: 100%; box-shadow: 0 2px 8px rgba(0,0,0,.2); }
+.pj-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pj-info .hint { margin: 2px 0; }
+.pj-actions button { padding: 3px 8px; font-size: 12px; }
+
+/* collections */
+.coll-bar input { flex: 1; min-width: 180px; }
+.coll-list { display: flex; flex-direction: column; gap: 10px; max-height: 55vh; overflow-y: auto; }
+.coll-row { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.coll-thumbs { display: flex; gap: 4px; flex-wrap: wrap; }
+.coll-thumbs img { width: 44px; height: 44px; object-fit: contain; border-radius: 4px; background: var(--card); }
+.coll-row button { padding: 3px 8px; font-size: 12px; }
