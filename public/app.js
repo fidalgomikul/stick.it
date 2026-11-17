@@ -4143,6 +4143,36 @@ $('#btnTheme').addEventListener('click', () => {
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', readThemeColors);
 applyTheme();
 
+// ---------------------------------------------------------------- offline & install
+// The service worker (sw.js) keeps the app usable offline. Browsers only allow it on https or
+// localhost, so it's skipped when the app is opened over the local network (http://<pc-ip>:5173).
+if ('serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Offline support is unavailable:', e));
+}
+function syncOnline() {
+  $('#offlineBadge').classList.toggle('hidden', navigator.onLine);
+}
+window.addEventListener('online', syncOnline);
+window.addEventListener('offline', syncOnline);
+syncOnline();
+
+// "Install app": browsers that support it hand us a prompt we can show from our own button
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  installPrompt = e;
+  $('#btnInstall').classList.remove('hidden');
+});
+$('#btnInstall').addEventListener('click', async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  const { outcome } = await installPrompt.userChoice;
+  installPrompt = null;
+  $('#btnInstall').classList.add('hidden');
+  if (outcome === 'accepted') status('Installed. Collage Studio now opens in its own window and works offline.');
+});
+window.addEventListener('appinstalled', () => $('#btnInstall').classList.add('hidden'));
+
 // ---------------------------------------------------------------- boot
 initPrintUi();
 syncBackgroundUi();

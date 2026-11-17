@@ -32,6 +32,9 @@ const MIME = {
   '.jpg': 'image/jpeg',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json',
+  '.webp': 'image/webp',
+  '.woff2': 'font/woff2',
 };
 
 function sendJson(res, status, obj) {

@@ -4,7 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Collage Studio</title>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css" />
+  <link rel="stylesheet" href="vendor/cropper.min.css" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#2f6fde" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="stylesheet" href="styles.css" />
   <script>try { var t = localStorage.getItem('collage.theme'); if (t && t !== 'auto') document.documentElement.setAttribute('data-theme', t); } catch (e) {}</script>
 </head>
@@ -23,6 +27,8 @@
       <span id="saveState" class="save-state"></span>
     </div>
     <div class="topbar-actions">
+      <span id="offlineBadge" class="offline-badge hidden" title="No internet: image search is unavailable, everything else works">Offline</span>
+      <button id="btnInstall" class="ghost hidden" title="Install Collage Studio as an app that opens in its own window and works offline">Install app</button>
       <button id="btnTheme" class="ghost" title="Theme">◐ Auto</button>
       <button id="btnUndo" class="ghost" title="Undo (Ctrl+Z)" disabled>↶ Undo</button>
       <button id="btnRedo" class="ghost" title="Redo (Ctrl+Y / Ctrl+Shift+Z)" disabled>↷ Redo</button>
@@ -648,8 +654,8 @@
 
   <div id="dropOverlay" class="drop-overlay hidden">Drop images to add stickers</div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
+  <script src="vendor/fabric.min.js"></script>
+  <script src="vendor/cropper.min.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

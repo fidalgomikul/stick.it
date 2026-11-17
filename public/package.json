@@ -1,0 +1,4 @@
+{
+  "type": "module",
+  "description": "The browser app. Marks these files as ES modules for Node (used by the unit tests)."
+}

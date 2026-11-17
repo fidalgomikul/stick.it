@@ -1,0 +1,20 @@
+{
+  "name": "collage-studio",
+  "version": "0.8.0",
+  "private": true,
+  "description": "Make printable sticker collages from your own images. No AI image generation.",
+  "scripts": {
+    "start": "node server.js",
+    "icons": "node scripts/make-icons.mjs",
+    "test": "node --test \"tests/unit/*.test.mjs\"",
+    "test:e2e": "playwright test",
+    "test:all": "npm test && npm run test:e2e"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@playwright/test": "^1.65.1"
+  }
+}

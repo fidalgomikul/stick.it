@@ -1,4 +1,4 @@
-# Collage Studio (draft)
+# Collage Studio
 
 Build a printable sticker collage from your own images (or openly licensed images found online), lay them out randomly, then fine‑tune every sticker by hand.
 
@@ -8,7 +8,14 @@ Build a printable sticker collage from your own images (or openly licensed image
 node server.js
 ```
 
-Open http://localhost:5173. You need Node 18+. There's nothing to install.
+Open http://localhost:5173. You need Node 18+. The app has no dependencies to install; `npm start` does the same thing.
+
+### Install it and use it offline
+In Edge or Chrome, click **Install app** in the header, or the install icon in the address bar. Collage Studio then opens in its own window.
+- Once it has been opened once, it works **without internet and even without the server running**: your projects, editing and exporting all work.
+- Image search, pasting web links and automatic background removal need an internet connection, and search needs the server. The *Offline* badge shows when you're offline.
+- Fonts and the background-removal model are kept for offline use after their first use.
+- Offline mode and installing only work on `localhost` or `https`. When the app is opened over the local network (`http://<pc-ip>:5173`, for example on a phone), it works normally but online only.
 
 ### On your phone or tablet
 Put the phone on the same Wi-Fi as the computer and open `http://<your-computer's-IP>:5173`. Run `ipconfig` to find the IPv4 address. Windows may ask once to allow Node through the firewall.
@@ -101,6 +108,22 @@ The keys stay on your computer: the browser never sees them. Google Images (`GOO
   - Resize handles are larger on touch screens.
   - Dialogs go full-screen.
 
+## Tests
+```
+npm install        # once, installs the test runner (Playwright)
+npm test           # unit tests: layout engine, PDF writer, project files (Node 21+)
+npm run test:e2e   # end-to-end tests in a real browser (Microsoft Edge on Windows, Chrome elsewhere)
+npm run test:all   # both
+```
+The end-to-end tests start their own server on port 5174 and use a fresh browser profile, so they never touch your projects. They cover:
+- loading without errors;
+- uploading, generating a layout and per-action undo;
+- PNG export at the exact print size and PDF export with the trim size;
+- the sticker editor;
+- projects across a reload;
+- curved text, groups and layers;
+- working offline.
+
 ## Files
 - `server.js`: static server, search endpoint, and an image proxy so exports aren't blocked by CORS.
 - `public/app.js`: UI, canvas (Fabric.js 5), library, editor and export.
@@ -108,7 +131,11 @@ The keys stay on your computer: the browser never sees them. Google Images (`GOO
 - `public/backgrounds.js`: page backgrounds and generated paper textures.
 - `public/layouts.js`: the layout styles (placement maths only).
 - `public/imaging.js`: colour keying, trimming, outlines and DPI metadata.
-- `public/project.js`: `.collage` file format and the IndexedDB autosave.
+- `public/project.js`: the `.collage` file format and browser storage (projects, collections, shared images).
+- `public/sw.js`: the service worker that makes the app work offline; `public/manifest.webmanifest` and `public/icons/` make it installable.
+- `public/vendor/`: Fabric.js and Cropper.js, bundled for offline use (MIT, see its README).
+- `scripts/make-icons.mjs`: draws the app icons (no dependencies).
+- `tests/`: unit tests (`node --test`) and end-to-end tests (Playwright).
 
 ## About
 This app's code was written with the help of AI coding tools. **No AI image generation is used anywhere.** Every image on a print is one you uploaded, pasted or picked from an image search. The app says this in its status bar.
