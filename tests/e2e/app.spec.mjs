@@ -92,6 +92,22 @@ test('upload, generate a layout, and undo one action at a time', async ({ page }
   expect(errors).toEqual([]);
 });
 
+test('removes all ticked stickers and their copies in one undoable step', async ({ page }) => {
+  const errors = await openApp(page);
+  await addImages(page);
+  await page.click('#library .lib-item:nth-child(1) [data-act=place]');
+  await page.click('#library .lib-item:nth-child(2) [data-act=place]');
+  await page.uncheck('#library .lib-item:nth-child(3) input[type=checkbox]');
+  await expect(page.locator('#bulkRemove')).toHaveText('✕ Remove 2 ticked');
+  await page.click('#bulkRemove');
+  await expect.poll(async () => (await libraryNames(page)).length).toBe(1);
+  expect(await objectCount(page)).toBe(0); // their copies left the print too
+  await page.click('#btnUndo');
+  await expect.poll(async () => (await libraryNames(page)).length).toBe(3);
+  expect(await objectCount(page)).toBe(2);
+  expect(errors).toEqual([]);
+});
+
 test('exports a PNG at the exact print size and a PDF with the trim size', async ({ page }) => {
   await openApp(page);
   await addImages(page, IMAGES.slice(0, 1));

@@ -2008,7 +2008,8 @@ function renderLibraryView() {
   const tickedShown = shown.filter((i) => i.use).length;
   $('#bulkCopies').classList.toggle('hidden', shown.length < 2);
   $('#bulkLabel').textContent = `Copies for ${tickedShown} ticked${filtering ? ' (shown)' : ''}:`;
-  ['#bulkMinus', '#bulkSet', '#bulkPlus', '#bulkSize'].forEach((sel) => { $(sel).disabled = tickedShown === 0; });
+  ['#bulkMinus', '#bulkSet', '#bulkPlus', '#bulkSize', '#bulkRemove'].forEach((sel) => { $(sel).disabled = tickedShown === 0; });
+  $('#bulkRemove').textContent = tickedShown ? `✕ Remove ${tickedShown} ticked` : '✕ Remove ticked';
 
   renderTagBar();
 
@@ -2167,7 +2168,17 @@ $('#bulkSize').addEventListener('change', (e) => {
 function removeFromLibrary(item) {
   const onCanvas = allLeafObjects().filter((o) => o.stickerId === item.id);
   if (onCanvas.length && !confirm(`Remove this sticker? Its ${onCanvas.length} cop${onCanvas.length === 1 ? 'y' : 'ies'} on the print will be removed too.`)) return;
+  removeStickers([item]);
+}
+
+/** Remove stickers from the list along with all their copies on the print. One undo step. */
+function removeStickers(items) {
   canvas.discardActiveObject();
+  for (const item of items) removeCopiesOf(item);
+  renderLibrary(); canvas.requestRenderAll(); updateCanvasStatus();
+}
+function removeCopiesOf(item) {
+  const onCanvas = allLeafObjects().filter((o) => o.stickerId === item.id);
   onCanvas.forEach((o) => {
     const g = o.group;
     if (!g) { canvas.remove(o); return; }
@@ -2181,8 +2192,18 @@ function removeFromLibrary(item) {
     }
   });
   library.splice(library.indexOf(item), 1);
-  renderLibrary(); canvas.requestRenderAll(); updateCanvasStatus();
 }
+
+$('#bulkRemove').addEventListener('click', () => {
+  const items = shownLibrary().filter((i) => i.use); // only ticked stickers that are visible in the list
+  if (!items.length) return;
+  const ids = new Set(items.map((i) => i.id));
+  const copies = allLeafObjects().filter((o) => ids.has(o.stickerId)).length;
+  const what = `${items.length} ticked sticker${items.length === 1 ? '' : 's'}`;
+  if (!confirm(`Remove ${what}?` + (copies ? ` Their ${copies} cop${copies === 1 ? 'y' : 'ies'} on the print will be removed too.` : '') + ' You can undo this.')) return;
+  removeStickers(items);
+  status(`Removed ${what}. Undo (Ctrl+Z) brings them back.`);
+});
 
 $('#btnSelectAll').addEventListener('click', () => { shownLibrary().forEach((i) => (i.use = true)); renderLibrary(); });
 $('#btnSelectNone').addEventListener('click', () => { shownLibrary().forEach((i) => (i.use = false)); renderLibrary(); });
