@@ -54,6 +54,19 @@ test('logo follows the theme, and the Playful look can be switched on and stays 
   expect(errors).toEqual([]);
 });
 
+test('side panels fit without sideways scrolling, in both looks', async ({ page }) => {
+  await openApp(page);
+  await addImages(page, IMAGES.slice(0, 2));
+  for (const playful of [false, true]) {
+    await page.evaluate((p) => p ? document.documentElement.setAttribute('data-look', 'playful') : document.documentElement.removeAttribute('data-look'), playful);
+    const overflow = await page.evaluate(() => [...document.querySelectorAll('.panel')].map((p) => {
+      const lim = p.getBoundingClientRect().left + p.clientWidth;
+      return [...p.querySelectorAll('*')].filter((e) => e.offsetParent && e.getBoundingClientRect().right > lim + 0.5).map((e) => e.id || e.className);
+    }).flat());
+    expect(overflow).toEqual([]);
+  }
+});
+
 test('upload, generate a layout, and undo one action at a time', async ({ page }) => {
   const errors = await openApp(page);
   await addImages(page);
