@@ -54,6 +54,28 @@ test('logo follows the theme, and the Playful look can be switched on and stays 
   expect(errors).toEqual([]);
 });
 
+test('the header keeps its size while saving, and fits at medium and wide windows', async ({ page }) => {
+  await openApp(page);
+  await addImages(page, IMAGES.slice(0, 1)); // gives autosave something to save
+  for (const width of [1400, 1100, 950]) {
+    await page.setViewportSize({ width, height: 800 });
+    for (const playful of [false, true]) {
+      const r = await page.evaluate(async (p) => {
+        p ? document.documentElement.setAttribute('data-look', 'playful') : document.documentElement.removeAttribute('data-look');
+        await document.fonts.ready;
+        const tb = document.querySelector('.topbar'), el = document.querySelector('#saveState'), heights = new Set();
+        let fits = true;
+        for (const [kind, text] of [['saving', 'Saving…'], ['saved', 'Saved in this browser'], ['bad', 'Autosave failed: use Save project'], ['', '']]) {
+          el.dataset.state = kind; el.textContent = text;
+          heights.add(tb.offsetHeight); fits = fits && tb.scrollWidth <= tb.clientWidth;
+        }
+        return { heights: heights.size, fits };
+      }, playful);
+      expect(r, `${width}px, ${playful ? 'playful' : 'classic'}`).toEqual({ heights: 1, fits: true });
+    }
+  }
+});
+
 test('side panels fit without sideways scrolling, in both looks', async ({ page }) => {
   await openApp(page);
   await addImages(page, IMAGES.slice(0, 2));

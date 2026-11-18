@@ -3354,10 +3354,20 @@ function markDirty(kind) {
   queueHistoryCommit();
 }
 
+/** The header's save message. kind: 'saving' | 'saved' | 'bad' | '' (nothing to show).
+ *  On narrower windows only a mark shows (… ✓ !) and the words move to the tooltip. */
+function setSaveState(kind, title) {
+  const el = $('#saveState');
+  el.textContent = { saving: 'Saving…', saved: 'Saved in this browser', bad: 'Autosave failed: use Save project', '': '' }[kind];
+  el.dataset.state = kind;
+  el.classList.toggle('bad', kind === 'bad');
+  el.title = title || el.textContent;
+}
+
 function scheduleAutosave() {
   unsaved = true;
   changeSeq++;
-  $('#saveState').textContent = 'Saving…';
+  setSaveState('saving');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(runAutosave, 1200);
 }
@@ -3370,18 +3380,16 @@ async function runAutosave() {
   saving = true;
   const seqAtStart = changeSeq;
   try {
-    if (!currentSaved && projectIsBlank()) { unsaved = false; $('#saveState').textContent = ''; return; } // nothing to keep yet
+    if (!currentSaved && projectIsBlank()) { unsaved = false; setSaveState(''); return; } // nothing to keep yet
     const { meta, blobs } = await serializeProject();
     const thumb = await makeThumbnail().catch(() => null);
     await saveProject(currentProjectId, meta, blobs, thumb);
     if (!currentSaved) { currentSaved = true; await setSetting('currentProject', currentProjectId); }
     unsaved = changeSeq !== seqAtStart; // edits made during the save still need saving
-    $('#saveState').textContent = 'Saved in this browser';
-    $('#saveState').title = 'Autosaved ' + new Date().toLocaleTimeString();
+    setSaveState('saved', 'Saved in this browser at ' + new Date().toLocaleTimeString());
   } catch (e) {
     console.error(e);
-    $('#saveState').textContent = 'Autosave failed — use Save project';
-    $('#saveState').title = e.message;
+    setSaveState('bad', 'Autosave failed: use Save project. ' + e.message);
   } finally {
     saving = false;
     if (dirtyWhileSaving || unsaved) { dirtyWhileSaving = false; scheduleAutosave(); }
@@ -3792,7 +3800,7 @@ async function openProject(id) {
   currentProjectId = id; currentSaved = true; unsaved = false;
   await setSetting('currentProject', id);
   resetHistory();
-  $('#saveState').textContent = 'Saved in this browser';
+  setSaveState('saved');
   status(`Opened “${projectName}”.`);
 }
 
@@ -3813,7 +3821,7 @@ async function startNewProject({ save = true } = {}) {
   currentProjectId = newProjectId(); currentSaved = false; unsaved = false;
   persistReady = true;
   resetHistory();
-  $('#saveState').textContent = '';
+  setSaveState('');
   setProjectName(DEFAULT_PROJECT_NAME);
   status('Started a new collage. Your other projects are under Projects.');
 }
@@ -4146,13 +4154,21 @@ $('#creditsDownload').addEventListener('click', () => {
 // ---------------------------------------------------------------- theme
 // 'auto' follows the system setting; the choice is remembered in this browser.
 const THEMES = ['auto', 'dark', 'light'];
+/** "◐ Auto" → icon plus a word that hides on narrower windows (the tooltip keeps the full name). */
+function setIconLabel(btn, label) {
+  const [icon, ...words] = label.split(' ');
+  btn.textContent = icon;
+  const span = document.createElement('span');
+  span.className = 'lbl'; span.textContent = ' ' + words.join(' ');
+  btn.appendChild(span);
+}
 const THEME_LABEL = { auto: '◐ Auto', dark: '☾ Dark', light: '☀ Light' };
 let theme = 'auto';
 try { theme = localStorage.getItem('collage.theme') || 'auto'; } catch { /* ignore */ }
 function applyTheme() {
   if (theme === 'auto') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', theme);
-  $('#btnTheme').textContent = THEME_LABEL[theme];
+  setIconLabel($('#btnTheme'), THEME_LABEL[theme]);
   $('#btnTheme').title = 'Theme: ' + theme + ' (click to change)';
   readThemeColors();
 }
@@ -4174,7 +4190,7 @@ function applyLook() {
     document.documentElement.setAttribute('data-look', 'playful');
     ensureUiFont();
   } else document.documentElement.removeAttribute('data-look');
-  $('#btnLook').textContent = LOOK_LABEL[look];
+  setIconLabel($('#btnLook'), LOOK_LABEL[look]);
   $('#btnLook').title = 'Look: ' + look + ' (click to switch between Classic and Playful)';
   readThemeColors();
 }
@@ -4241,7 +4257,7 @@ updateCanvasStatus();
     if (saved) {
       await restoreProject(saved.meta, saved.blobs);
       currentProjectId = id; currentSaved = true;
-      $('#saveState').textContent = 'Saved in this browser';
+      setSaveState('saved');
       status(`Restored “${projectName}” from ${new Date(saved.savedAt).toLocaleString()}.`);
     }
   } catch (e) {
