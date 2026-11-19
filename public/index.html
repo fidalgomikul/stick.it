@@ -119,6 +119,14 @@
           <button id="zoomFit" title="Fit the whole page (Ctrl + 0)">Fit</button>
         </div>
       </div>
+      <div id="tabWarning" class="tab-warning" role="status" hidden>
+        <span id="tabWarningText"></span>
+        <span class="row gap-sm">
+          <button id="tabReload" class="primary" title="Replace what's in this tab with the version the other tab saved">Load their changes</button>
+          <button id="tabKeep" title="Save this tab's version over the other tab's">Keep mine</button>
+          <button id="tabDismiss">Got it</button>
+        </span>
+      </div>
       <div id="stage" class="stage">
         <div id="canvasShell" class="canvas-shell">
           <canvas id="canvas"></canvas>

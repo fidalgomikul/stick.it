@@ -3373,9 +3373,9 @@ function markDirty(kind) {
  *  On narrower windows only a mark shows (… ✓ !) and the words move to the tooltip. */
 function setSaveState(kind, title) {
   const el = $('#saveState');
-  el.textContent = { saving: 'Saving…', saved: 'Saved in this browser', bad: 'Autosave failed: use Save project', '': '' }[kind];
+  el.textContent = { saving: 'Saving…', saved: 'Saved in this browser', bad: 'Autosave failed: use Save project', paused: 'Not saved: see the note', '': '' }[kind];
   el.dataset.state = kind;
-  el.classList.toggle('bad', kind === 'bad');
+  el.classList.toggle('bad', kind === 'bad' || kind === 'paused');
   el.title = title || el.textContent;
 }
 
@@ -3392,6 +3392,7 @@ canvas.on('text:editing:exited', () => markDirty());        // …is one step pe
 
 async function runAutosave() {
   if (saving) { dirtyWhileSaving = true; return; }
+  if (changedElsewhere) { setSaveState('paused'); return; } // don't overwrite the other tab's save
   saving = true;
   const seqAtStart = changeSeq;
   try {
@@ -3400,6 +3401,7 @@ async function runAutosave() {
     const thumb = await makeThumbnail().catch(() => null);
     await saveProject(currentProjectId, meta, blobs, thumb);
     if (!currentSaved) { currentSaved = true; await setSetting('currentProject', currentProjectId); }
+    announceTab('saved');
     unsaved = changeSeq !== seqAtStart; // edits made during the save still need saving
     setSaveState('saved', 'Saved in this browser at ' + new Date().toLocaleTimeString());
   } catch (e) {
@@ -3751,7 +3753,7 @@ $('#projectInput').addEventListener('change', async (e) => {
     const { meta, blobs } = await decodeProjectFile(file);
     await restoreProject(meta, blobs);
     if (!meta.name) setProjectName(file.name.replace(/\.collage$/i, '').replace(/[-_]+/g, ' ')); // older files had no name
-    currentProjectId = newProjectId(); currentSaved = false; unsaved = true;
+    setCurrentProject(newProjectId()); currentSaved = false; unsaved = true;
     await runAutosave(); // keep it as a new project right away
     resetHistory();
     status(`Opened ${file.name}.`);
@@ -3772,6 +3774,75 @@ let currentSaved = false; // false until this project is first stored (an untouc
 const newProjectId = () => 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const projectIsBlank = () => !library.length && !canvas.getObjects().length && projectName === DEFAULT_PROJECT_NAME;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---------------------------------------------------------------- the same project open in two tabs
+// Each tab works on its own copy of the project and saves all of it, so the last tab to save would
+// silently win. Tabs tell each other which project they have open (BroadcastChannel). When the same
+// project is open twice, a note says so; when the other tab saves it, this tab stops saving until
+// you choose: load their changes, or keep yours (which then overwrites theirs).
+const TAB_ID = Math.random().toString(36).slice(2);
+const otherTabs = new Map(); // other tab id → the project it has open
+const tabChannel = 'BroadcastChannel' in window ? new BroadcastChannel('stickit-tabs') : null;
+let changedElsewhere = false; // the other tab saved this project after we opened it
+let tabNoteDismissed = null;  // project id whose "open twice" note was dismissed
+
+function setCurrentProject(id) {
+  if (id !== currentProjectId) changedElsewhere = false;
+  currentProjectId = id;
+  announceTab('open');
+  syncTabWarning();
+}
+function announceTab(type) { try { tabChannel?.postMessage({ type, tab: TAB_ID, project: currentProjectId }); } catch { /* closed */ } }
+tabChannel?.addEventListener('message', ({ data: m }) => {
+  if (!m || m.tab === TAB_ID) return;
+  if (m.type === 'bye') otherTabs.delete(m.tab);
+  else otherTabs.set(m.tab, m.project);
+  if (m.type === 'open') announceTab('here'); // answer a tab that just opened something
+  if (m.type === 'saved' && m.project && m.project === currentProjectId) {
+    changedElsewhere = true;
+    clearTimeout(saveTimer);
+    if (unsaved) setSaveState('paused');
+  }
+  syncTabWarning();
+});
+window.addEventListener('pagehide', () => announceTab('bye'));
+window.addEventListener('pageshow', (e) => { if (e.persisted) announceTab('open'); });
+
+function syncTabWarning() {
+  const box = $('#tabWarning');
+  if (!box) return;
+  const twice = !!currentProjectId && [...otherTabs.values()].includes(currentProjectId);
+  if (changedElsewhere) {
+    box.dataset.kind = 'changed';
+    $('#tabWarningText').textContent = 'This project was just saved from another tab. Saving here is paused so neither version is lost.';
+  } else if (twice && tabNoteDismissed !== currentProjectId) {
+    box.dataset.kind = 'twice';
+    $('#tabWarningText').textContent = 'This project is also open in another tab. Whichever tab saves last replaces the other’s changes, so it’s best to work in one.';
+  } else { box.hidden = true; return; }
+  $('#tabReload').hidden = !changedElsewhere;
+  $('#tabKeep').hidden = !changedElsewhere;
+  $('#tabDismiss').hidden = changedElsewhere;
+  box.hidden = false;
+}
+$('#tabDismiss').addEventListener('click', () => { tabNoteDismissed = currentProjectId; syncTabWarning(); });
+$('#tabKeep').addEventListener('click', async () => { // this tab's version wins: save it now
+  changedElsewhere = false; tabNoteDismissed = currentProjectId; syncTabWarning();
+  unsaved = true; changeSeq++;
+  await runAutosave();
+});
+$('#tabReload').addEventListener('click', async () => { // drop this tab's version and load the saved one
+  clearTimeout(saveTimer);
+  while (saving) await sleep(40);
+  const saved = await loadProject(currentProjectId);
+  if (!saved) { status('That project could not be found any more.'); return; }
+  changedElsewhere = false; tabNoteDismissed = currentProjectId;
+  await restoreProject(saved.meta, saved.blobs);
+  unsaved = false; currentSaved = true;
+  setSaveState('saved');
+  resetHistory();
+  syncTabWarning();
+  status('Loaded the changes from the other tab.');
+});
 
 /** File-name-safe version of a name. */
 function slugify(name, fallback = 'collage') {
@@ -3797,6 +3868,7 @@ async function makeThumbnail(maxSide = 320) {
 
 /** Finish any pending save of the current project (before switching away from it). */
 async function flushSave() {
+  if (changedElsewhere) return; // this tab's unsaved version was not kept (the other tab saved last)
   for (let tries = 0; tries < 5; tries++) { // repeat if more changes arrive while saving
     clearTimeout(saveTimer);
     while (saving) await sleep(40);
@@ -3812,7 +3884,7 @@ async function openProject(id) {
   const saved = await loadProject(id);
   if (!saved) { status('That project could not be found.'); return; }
   await restoreProject(saved.meta, saved.blobs);
-  currentProjectId = id; currentSaved = true; unsaved = false;
+  setCurrentProject(id); currentSaved = true; unsaved = false;
   await setSetting('currentProject', id);
   resetHistory();
   setSaveState('saved');
@@ -3833,7 +3905,7 @@ async function startNewProject({ save = true } = {}) {
   renderLibrary();
   updateCanvasStatus();
   refreshSelectionPanel();
-  currentProjectId = newProjectId(); currentSaved = false; unsaved = false;
+  setCurrentProject(newProjectId()); currentSaved = false; unsaved = false;
   persistReady = true;
   resetHistory();
   setSaveState('');
@@ -3909,7 +3981,7 @@ async function renderProjects() {
       await deleteProject(p.id);
       if (isCurrent) {
         const rest = (await listProjects())[0];
-        if (rest) { currentProjectId = null; await openProject(rest.id); } else await startNewProject({ save: false });
+        if (rest) { setCurrentProject(null); await openProject(rest.id); } else await startNewProject({ save: false });
       }
       status(`Deleted “${p.name}”.`);
       renderProjects();
@@ -4271,7 +4343,7 @@ updateCanvasStatus();
     const saved = id && await loadProject(id);
     if (saved) {
       await restoreProject(saved.meta, saved.blobs);
-      currentProjectId = id; currentSaved = true;
+      setCurrentProject(id); currentSaved = true;
       setSaveState('saved');
       status(`Restored “${projectName}” from ${new Date(saved.savedAt).toLocaleString()}.`);
     }
@@ -4279,7 +4351,7 @@ updateCanvasStatus();
     console.error(e);
     status('Could not restore the autosaved collage: ' + e.message);
   } finally {
-    if (!currentProjectId) currentProjectId = newProjectId();
+    if (!currentProjectId) setCurrentProject(newProjectId());
     persistReady = true;
     resetHistory();
   }

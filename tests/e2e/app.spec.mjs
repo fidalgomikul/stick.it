@@ -281,6 +281,42 @@ test('text, groups and layers', async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test('the same project in two tabs: warns, pauses saving, and can load the other tab’s changes', async ({ page, context }) => {
+  const errors = await openApp(page);
+  await addImages(page, IMAGES.slice(0, 1));
+  await page.click('#btnProjects'); // saves; the project is now the one that reopens
+  await expect(page.locator('#projectsDialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#projectsDialog')).toBeHidden();
+
+  const tab2 = await context.newPage();
+  tab2.on('dialog', (d) => d.accept());
+  await tab2.goto('/');
+  await tab2.waitForFunction(() => window.collage && window.collage.library.length === 1);
+  // both tabs say the project is open twice
+  await expect(page.locator('#tabWarning')).toBeVisible();
+  await expect(tab2.locator('#tabWarning')).toContainText('also open in another tab');
+
+  // tab 2 adds a sticker and saves → tab 1 stops saving and offers the choice
+  await addImages(tab2, IMAGES.slice(1, 2));
+  await tab2.click('#btnProjects');
+  await expect(tab2.locator('#projectsDialog')).toBeVisible();
+  await tab2.keyboard.press('Escape');
+  await expect(page.locator('#tabWarning')).toContainText('saved from another tab');
+  await expect(page.locator('#tabDismiss')).toBeHidden(); // only the two choices
+  await page.evaluate(() => window.collage.library.forEach((i) => { i.count = 7; }));
+  await page.locator('#library .lib-item input[type=number]').first().dispatchEvent('change'); // an edit in tab 1
+  await page.waitForTimeout(1800); // longer than the autosave delay
+  await expect(page.locator('#saveState')).toHaveAttribute('data-state', 'paused');
+
+  // loading their changes brings tab 2's sticker into tab 1
+  await page.click('#tabReload');
+  await expect.poll(async () => (await libraryNames(page)).length).toBe(2);
+  await expect(page.locator('#tabWarning')).toBeHidden();
+  await tab2.close();
+  expect(errors).toEqual([]);
+});
+
 test('works offline once it has been opened', async ({ page, context }) => {
   await openApp(page);
   await page.evaluate(() => navigator.serviceWorker.ready);

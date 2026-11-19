@@ -46,6 +46,7 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 .hidden { display: none !important; }
+[hidden] { display: none !important; } /* the attribute must win over display set by button/flex styles */
 
 h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; }
 h3 { font-size: 14px; margin: 0 0 8px; }
@@ -189,6 +190,13 @@ dialog::backdrop { background: rgba(20,20,20,.45); }
 /* fixed-size slot: the message changes on every save, and its length must never resize the header */
 .save-state { font-size: 12px; line-height: 1.25; color: var(--muted); margin-left: 6px; flex: 0 0 8.5em; height: 2.5em; display: flex; align-items: center; overflow: hidden; }
 .save-state.bad { color: var(--danger); font-weight: 600; }
+.tab-warning {
+  position: absolute; z-index: 20; top: 60px; left: 50%; transform: translateX(-50%); width: min(560px, calc(100% - 24px));
+  display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 12px; border-radius: var(--radius);
+  background: var(--glass); border: 1px solid var(--border); border-left: 4px solid var(--accent); box-shadow: 0 8px 24px rgba(0, 0, 0, .18); font-size: 13px;
+}
+.tab-warning[data-kind="changed"] { border-left-color: var(--danger); }
+.tab-warning > span:first-child { flex: 1 1 240px; }
 .project-name { min-width: 120px; }
 
 /* Narrower windows (but not phones): the header buttons keep only their icons and the save
@@ -200,7 +208,7 @@ dialog::backdrop { background: rgba(20,20,20,.45); }
   .save-state::before { font-size: 14px; font-weight: 600; }
   .save-state[data-state="saving"]::before { content: "…"; }
   .save-state[data-state="saved"]::before { content: "✓"; }
-  .save-state[data-state="bad"]::before { content: "!"; }
+  .save-state[data-state="bad"]::before, .save-state[data-state="paused"]::before { content: "!"; }
   .project-actions button { padding-left: 9px; padding-right: 9px; }
 }
 @media (max-width: 900px) { .topbar .lbl { display: none; } }
