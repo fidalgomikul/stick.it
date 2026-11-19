@@ -204,7 +204,7 @@ dialog::backdrop { background: rgba(20,20,20,.45); }
 @media (max-width: 1280px) and (min-width: 901px) {
   .topbar .lbl { display: none; }
   .brand .logo { height: 24px; }
-  .save-state { font-size: 0; flex-basis: 1.6em; justify-content: center; }
+  .save-state { font-size: 0; flex: 0 0 22px; width: 22px; justify-content: center; } /* px: em would be 0 here */
   .save-state::before { font-size: 14px; font-weight: 600; }
   .save-state[data-state="saving"]::before { content: "…"; }
   .save-state[data-state="saved"]::before { content: "✓"; }

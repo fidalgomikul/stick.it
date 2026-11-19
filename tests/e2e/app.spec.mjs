@@ -63,15 +63,16 @@ test('the header keeps its size while saving, and fits at medium and wide window
       const r = await page.evaluate(async (p) => {
         p ? document.documentElement.setAttribute('data-look', 'playful') : document.documentElement.removeAttribute('data-look');
         await document.fonts.ready;
-        const tb = document.querySelector('.topbar'), el = document.querySelector('#saveState'), heights = new Set();
+        const tb = document.querySelector('.topbar'), el = document.querySelector('#saveState'), heights = new Set(), widths = new Set();
+        let slotWidth = Infinity;
         let fits = true;
-        for (const [kind, text] of [['saving', 'Saving…'], ['saved', 'Saved in this browser'], ['bad', 'Autosave failed: use Save project'], ['', '']]) {
+        for (const [kind, text] of [['saving', 'Saving…'], ['saved', 'Saved in this browser'], ['bad', 'Autosave failed: use Save project'], ['paused', 'Not saved: see the note'], ['', '']]) {
           el.dataset.state = kind; el.textContent = text;
-          heights.add(tb.offsetHeight); fits = fits && tb.scrollWidth <= tb.clientWidth;
+          slotWidth = Math.min(slotWidth, el.getBoundingClientRect().width); heights.add(tb.offsetHeight); widths.add(el.getBoundingClientRect().width + '/' + document.querySelector('#projectName').getBoundingClientRect().width); fits = fits && tb.scrollWidth <= tb.clientWidth;
         }
-        return { heights: heights.size, fits };
+        return { heights: heights.size, widths: widths.size, fits, hasSlot: slotWidth >= 20 };
       }, playful);
-      expect(r, `${width}px, ${playful ? 'playful' : 'classic'}`).toEqual({ heights: 1, fits: true });
+      expect(r, `${width}px, ${playful ? 'playful' : 'classic'}`).toEqual({ heights: 1, widths: 1, fits: true, hasSlot: true }); // nothing in the header changes size; the save message keeps its own space
     }
   }
 });
