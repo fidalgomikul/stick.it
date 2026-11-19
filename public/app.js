@@ -4357,5 +4357,9 @@ updateCanvasStatus();
   }
 })();
 
+// Shown in the status bar, so it's easy to tell which version a browser is running. Bump with each release.
+const APP_VERSION = '0.9.0';
+$('#appVersion').textContent = 'v' + APP_VERSION;
+
 // exposed for debugging in the console
 window.collage = { canvas, library, print, addToLibrary, generateCollage, serializeProject, restoreProject, get edView() { return { z: ev.z, ox: ev.ox, oy: ev.oy, fit: ev.fit, imgW: ev.imgW, imgH: ev.imgH }; }, get edTool() { return tool; }, get ed() { return ed; } };
