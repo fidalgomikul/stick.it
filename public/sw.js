@@ -6,7 +6,7 @@
 //  • fonts, the background-removal library and its model: cached the first time they're used
 // Projects themselves live in IndexedDB and never depend on this.
 
-const VERSION = '2026-11-17b';
+const VERSION = '2026-11-19';
 const SHELL = `collage-shell-${VERSION}`;
 const RUNTIME = 'collage-runtime';
 const SHELL_FILES = [
@@ -44,7 +44,8 @@ self.addEventListener('fetch', (event) => {
     }
     event.respondWith((async () => {
       try {
-        const res = await fetch(req);
+        // always ask the server for the newest version (a page navigation can't take options, so refetch it by URL)
+        const res = await fetch(req.mode === 'navigate' ? req.url : req, { cache: 'no-cache' });
         if (res.ok) (await caches.open(SHELL)).put(req, res.clone());
         return res;
       } catch {

@@ -312,6 +312,16 @@ function readThemeColors() {
   canvas.requestRenderAll();
 }
 
+// Off-screen renders (export, project thumbnails) go through Fabric's renderCanvas, which cancels any
+// redraw of the visible canvas that was waiting for the next frame. Opening a project draws it and
+// saves (with a thumbnail) right away, so the collage stayed blank until something forced a redraw.
+// Put back a redraw that was pending.
+const fabricToCanvasElement = canvas.toCanvasElement.bind(canvas);
+canvas.toCanvasElement = function (...args) {
+  const pending = !!canvas.isRendering;
+  try { return fabricToCanvasElement(...args); } finally { if (pending) canvas.requestRenderAll(); }
+};
+
 // Paint the work area and the page (in the print's background colour) beneath the objects.
 const fabricClear = canvas.clearContext.bind(canvas);
 canvas.clearContext = function (ctx) {
@@ -694,7 +704,12 @@ function applyCurve(t) {
   if (t.text.includes('\n')) t.set('text', t.text.replace(/\s*\n\s*/g, ' ')); // one line only
   t.initDimensions();
   t.set({ width: 1e5 }); t.initDimensions(); // measure the unwrapped line
-  const L = Math.max(1, t.getLineWidth(0));
+  // The arc is made a little longer than the text. Fabric measures arcs approximately, and if the
+  // path comes out even a fraction shorter than the text, the first letter is placed at the far end.
+  // Letters are placed using the width including the spacing after the last letter, which
+  // getLineWidth leaves out, so add that back too.
+  const spacing = t.charSpacing > 0 ? t._getWidthOfCharSpacing() : 0;
+  const L = Math.max(1, t.getLineWidth(0) + spacing) * 1.004 + 2;
   const theta = (Math.abs(c) / 100) * 2 * Math.PI * 0.95;
   const R = L / theta, half = theta / 2;
   const sx = R * Math.sin(half), cy = R * Math.cos(half), large = theta > Math.PI ? 1 : 0;

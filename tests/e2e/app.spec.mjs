@@ -207,6 +207,60 @@ test('projects are kept, listed and reopened after a reload', async ({ page }) =
   await expect.poll(async () => (await libraryNames(page)).length).toBe(2);
 });
 
+test('opening a .collage file shows the stickers straight away', async ({ page }) => {
+  const errors = await openApp(page);
+  await addImages(page, IMAGES.slice(1, 2)); // a solid, fully opaque image
+  await page.click('#library .lib-item [data-act=place]');
+  await page.evaluate(async () => {
+    const { encodeProjectFile } = await import('/project.js');
+    const { meta, blobs } = await window.collage.serializeProject();
+    const file = new File([encodeProjectFile(meta, blobs)], 'reopen.collage');
+    document.querySelector('#btnNewProject').click();
+    await new Promise((r) => setTimeout(r, 300));
+    const dt = new DataTransfer(); dt.items.add(file);
+    const input = document.querySelector('#projectInput');
+    input.files = dt.files; input.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await expect(page.locator('.stage-status')).toContainText('Opened reopen.collage');
+  // without any further interaction, the sticker must be drawn on the visible canvas
+  await expect.poll(() => page.evaluate(() => {
+    const cv = window.collage.canvas, o = cv.getObjects()[0];
+    if (!o) return 0;
+    const p = o.getCenterPoint(), v = cv.viewportTransform, s = cv.getRetinaScaling();
+    return cv.lowerCanvasEl.getContext('2d').getImageData(Math.round((p.x * v[0] + v[4]) * s), Math.round((p.y * v[3] + v[5]) * s), 1, 1).data[3];
+  })).toBe(255);
+  // the cause: an off-screen render (thumbnail, export) used to cancel a redraw waiting for the next frame
+  const stillPending = await page.evaluate(() => {
+    const cv = window.collage.canvas;
+    cv.requestRenderAll();
+    cv.toCanvasElement(0.1);
+    return !!cv.isRendering;
+  });
+  expect(stillPending).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('curved text keeps its letters in order, even with wide letter spacing', async ({ page }) => {
+  await openApp(page);
+  await page.click('#btnAddText');
+  await page.evaluate(() => window.collage.canvas.getActiveObject().exitEditing());
+  const wrong = await page.evaluate(() => {
+    const t = window.collage.canvas.getActiveObject(), input = document.querySelector('#txtCurve'), bad = [];
+    for (const [text, spacing] of [['Summer holidays 2026', 0], ['Hello', 200], ['stick.it', 800]]) {
+      for (const curve of [5, 30, 60, 100, -5, -60, -100]) {
+        t.set({ text, charSpacing: spacing });
+        input.value = curve; input.dispatchEvent(new Event('input', { bubbles: true }));
+        t._clearCache(); t.__charBounds = []; t.getLineWidth(0); // re-measure the letter positions
+        const angles = t.__charBounds[0].slice(0, text.length).map((b) => b.angle);
+        const inOrder = angles.every((a, i) => i === 0 || (curve > 0 ? a >= angles[i - 1] - 1e-6 : a <= angles[i - 1] + 1e-6));
+        if (!inOrder) bad.push(`${text} / spacing ${spacing} / curve ${curve}`);
+      }
+    }
+    return bad;
+  });
+  expect(wrong).toEqual([]);
+});
+
 test('text, groups and layers', async ({ page }) => {
   const errors = await openApp(page);
   await addImages(page, IMAGES.slice(0, 2));
